@@ -4,18 +4,22 @@ attribute vec4 a_pos;
 // texture idx in u_sprite
 attribute float a_sprite_idx;
 
+// instanced quad vertices
+attribute vec2 a_quad_pos;
+
 uniform mat4 u_matrix;
 
 // scale of current zoom
 uniform float u_scale;
 
+// viewport size for clip space pixel mapping
+uniform vec2 u_viewportSize;
+
 // sprites, an array of sprites
-// a sprite has 6 integers:
-// 0 : northwest's x, 1 : width, 2: height, 3: sprite size, 4: offset x, 5: offset y
-// array's length is not dynamic, support maximum count / 6 sprites
 uniform float u_sprite[maxUniformLength];
 
 varying vec3 v_texCoord;
+varying vec2 v_quadCoord;
 
 void main() {
   int idx = int(a_sprite_idx) * 6;
@@ -26,8 +30,19 @@ void main() {
 
   gl_Position = u_matrix * pos;
 
-  gl_PointSize = size;
+  vec2 pixelOffset = (a_quad_pos - 0.5) * size;
+  // Convert pixel offset to clip space: (pixels / viewport) * 2.0
+  vec2 clipOffset = pixelOffset / u_viewportSize * 2.0;
+  
+  // Y-axis flip in clip space if necessary depending on the engine, 
+  // but Maptalks 2D canvas is top-down (0 at top).
+  // In WebGL, clip space Y goes UP. So pixelOffset positive Y should go DOWN.
+  // Therefore clipOffset.y should be inverted.
+  gl_Position.xy += vec2(clipOffset.x, -clipOffset.y) * gl_Position.w;
 
-  // texture coord
+  // texture coord for fragment
   v_texCoord = vec3(u_sprite[idx], u_sprite[idx + 1], u_sprite[idx + 2]);
+  
+  // map quad pos [0, 1] to v_quadCoord which is used just like gl_PointCoord
+  v_quadCoord = a_quad_pos;
 }

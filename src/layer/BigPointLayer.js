@@ -53,15 +53,46 @@ BigPointLayer.registerRenderer('webgl', class extends WebglRenderer {
 
     onContextCreate() {
         const gl = this.gl;
-        const uniforms = ['u_matrix', 'u_scale', 'u_sprite[0]'];
+        this.ext = gl.getExtension('ANGLE_instanced_arrays');
+        if (!this.ext) {
+            console.warn('ANGLE_instanced_arrays not supported, fallback needed but not implemented.');
+        }
+
+        const uniforms = ['u_matrix', 'u_scale', 'u_viewportSize', 'u_sprite[0]'];
         const program = this.createProgram(shaders.point.vertexSource, shaders.point.fragmentSource, uniforms);
         this.useProgram(program);
-        const buffer = this.createBuffer();
-        gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+        
+        // 1. Setup quad buffer for instancing
+        const quadBuffer = this.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
+        const quadVertices = new Float32Array([
+            0.0, 0.0,
+            1.0, 0.0,
+            0.0, 1.0,
+            0.0, 1.0,
+            1.0, 0.0,
+            1.0, 1.0
+        ]);
+        gl.bufferData(gl.ARRAY_BUFFER, quadVertices, gl.STATIC_DRAW);
+        this.enableVertexAttrib([
+            ['a_quad_pos', 2]
+        ]);
+        
+        // 2. Setup instanced data buffer
+        this._instancedBuffer = this.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, this._instancedBuffer);
         this.enableVertexAttrib([
             ['a_pos', 2],
             ['a_sprite_idx', 1]
         ]);
+        
+        // Set divisor for instanced attributes
+        if (this.ext) {
+            const posLoc = gl.getAttribLocation(program, 'a_pos');
+            const spriteLoc = gl.getAttribLocation(program, 'a_sprite_idx');
+            this.ext.vertexAttribDivisorANGLE(posLoc, 1);
+            this.ext.vertexAttribDivisorANGLE(spriteLoc, 1);
+        }
     }
 
     draw() {
@@ -270,8 +301,15 @@ BigPointLayer.registerRenderer('webgl', class extends WebglRenderer {
         gl.uniformMatrix4fv(gl.program.u_matrix, false, m);
         const map = this.getMap();
         gl.uniform1f(gl.program.u_scale, map.getScale() / map.getScale(getTargetZoom(map)));
+        
+        gl.uniform2f(gl.program.u_viewportSize, this.canvas.width, this.canvas.height);
 
-        gl.drawArrays(gl.POINTS, 0, this._vertexCount);
+        if (this.ext) {
+            this.ext.drawArraysInstancedANGLE(gl.TRIANGLES, 0, 6, this._vertexCount);
+        } else {
+            // Fallback just in case ANGLE_instanced_arrays is completely missing
+            gl.drawArrays(gl.POINTS, 0, this._vertexCount);
+        }
     }
 
     _registerEvents() {

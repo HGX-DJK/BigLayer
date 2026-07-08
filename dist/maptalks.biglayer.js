@@ -6,7 +6,11 @@
 /*!
  * requires maptalks@>=0.37.0 
  */
-import { Browser, Canvas, Class, Coordinate, Layer, MapboxUtil, Marker, Point, Util, renderer } from 'maptalks';
+(function (global, factory) {
+	typeof exports === 'object' && typeof module !== 'undefined' ? factory(exports, require('maptalks')) :
+	typeof define === 'function' && define.amd ? define(['exports', 'maptalks'], factory) :
+	(factory((global.maptalks = global.maptalks || {}),global.maptalks));
+}(this, (function (exports,maptalks) { 'use strict';
 
 function create$2() {
     var out = new Float32Array(9);
@@ -789,7 +793,7 @@ var Painter = function (_maptalks$Class) {
     }
 
     return Painter;
-}(Class);
+}(maptalks.Class);
 
 function getTargetZoom(map) {
     return map.getMaxNativeZoom() / 2;
@@ -878,7 +882,7 @@ var WebglRenderer = function (_maptalks$renderer$Ca) {
         _maptalks$renderer$Ca.prototype.createCanvas.call(this);
 
         if (this.layer.options['doubleBuffer']) {
-            this.buffer = Canvas.createCanvas(this.canvas.width, this.canvas.height, this.getMap().CanvasClass);
+            this.buffer = maptalks.Canvas.createCanvas(this.canvas.width, this.canvas.height, this.getMap().CanvasClass);
             this.context = this.buffer.getContext('2d');
         }
 
@@ -1038,7 +1042,7 @@ var WebglRenderer = function (_maptalks$renderer$Ca) {
         h = Math.pow(2, Math.ceil(Math.log(h) / Math.LN2));
 
         var map = this.getMap();
-        var spriteCanvas = this.layer._spriteCanvas || Canvas.createCanvas(w, h, map.CanvasClass),
+        var spriteCanvas = this.layer._spriteCanvas || maptalks.Canvas.createCanvas(w, h, map.CanvasClass),
             ctx = spriteCanvas.getContext('2d'),
             texCoords = [],
             offsets = [],
@@ -1230,7 +1234,7 @@ var WebglRenderer = function (_maptalks$renderer$Ca) {
 
         var m = create$3();
         perspective(m, fov, size.width / size.height, 1, cameraToCenterDistance + 1E9);
-        if (!Util.IS_NODE) {
+        if (!maptalks.Util.IS_NODE) {
             scale$3(m, m, [1, -1, 1]);
         }
         translate$2(m, m, [0, 0, -cameraToCenterDistance]);
@@ -1260,7 +1264,7 @@ var WebglRenderer = function (_maptalks$renderer$Ca) {
         var m = create$3();
         perspective(m, fov, size.width / size.height, 1, farZ);
         var m1 = create$3();
-        if (!Util.IS_NODE) {
+        if (!maptalks.Util.IS_NODE) {
             scale$3(m, m, [1, -1, 1]);
         }
 
@@ -1340,7 +1344,7 @@ var WebglRenderer = function (_maptalks$renderer$Ca) {
     };
 
     WebglRenderer.prototype._createGLContext = function _createGLContext(canvas, options) {
-        var attributes = Util.extend({
+        var attributes = maptalks.Util.extend({
             'alpha': true,
             'antialias': true,
             'preserveDrawingBuffer': true
@@ -1387,7 +1391,7 @@ var WebglRenderer = function (_maptalks$renderer$Ca) {
             var b = name.indexOf('[');
             if (b >= 0) {
                 name = name.substring(0, b);
-                if (!Util.IS_NODE) {
+                if (!maptalks.Util.IS_NODE) {
                     uniform = uniform.substring(0, b);
                 }
             }
@@ -1405,7 +1409,7 @@ var WebglRenderer = function (_maptalks$renderer$Ca) {
     };
 
     return WebglRenderer;
-}(renderer.CanvasRenderer);
+}(maptalks.renderer.CanvasRenderer);
 
 var LineAtlas = function () {
     function LineAtlas(resources, options) {
@@ -1442,7 +1446,7 @@ var LineAtlas = function () {
         }
 
         var ctx = canvas.getContext('2d');
-        Canvas.prepareCanvas(ctx, symbol, this.resources);
+        maptalks.Canvas.prepareCanvas(ctx, symbol, this.resources);
 
         ctx.moveTo(0, size[1] / 2);
         ctx.lineTo(size[0], size[1] / 2);
@@ -1450,7 +1454,7 @@ var LineAtlas = function () {
 
         return {
             'canvas': canvas,
-            'offset': new Point(0, 0)
+            'offset': new maptalks.Point(0, 0)
         };
     };
 
@@ -1742,13 +1746,13 @@ var LinePainter = function (_Painter) {
         for (var _i = 0, _l = vertice.length; _i < _l; _i++) {
             var vertex = vertice[_i];
             if (this.options['project']) {
-                vertex = this.map.coordinateToPoint(new Coordinate(vertex), targetZ).toArray();
+                vertex = this.map.coordinateToPoint(new maptalks.Coordinate(vertex), targetZ).toArray();
             }
             currentVertex = pointGeometry.convert(vertex);
             if (_i < _l - 1) {
                 vertex = vertice[_i + 1];
                 if (this.options['project']) {
-                    vertex = this.map.coordinateToPoint(new Coordinate(vertex), targetZ).toArray();
+                    vertex = this.map.coordinateToPoint(new maptalks.Coordinate(vertex), targetZ).toArray();
                 }
                 nextVertex = pointGeometry.convert(vertex);
             } else {
@@ -1826,7 +1830,7 @@ var LinePainter = function (_Painter) {
 
         var normals = [this._precise(normal.x), this._precise(normal.y), linesofar];
         var n = this.normalArray.length / normals.length;
-        Util.pushIn(this.normalArray, normals);
+        maptalks.Util.pushIn(this.normalArray, normals);
         return n;
     };
 
@@ -2512,7 +2516,7 @@ var PolygonPainter = function (_Painter) {
             var v = [];
             var c = void 0;
             for (var _i = 0, _l = data.vertices.length; _i < _l; _i += 2) {
-                c = this.map.coordinateToPoint(new Coordinate(data.vertices[_i], data.vertices[_i + 1]), targetZ);
+                c = this.map.coordinateToPoint(new maptalks.Coordinate(data.vertices[_i], data.vertices[_i + 1]), targetZ);
                 v.push(c.x, c.y);
             }
             data.vertices = v;
@@ -2534,8 +2538,8 @@ var PolygonPainter = function (_Painter) {
                 return e + count;
             });
         }
-        Util.pushIn(this.vertexArray, data.vertices);
-        Util.pushIn(this.elementArray, triangles);
+        maptalks.Util.pushIn(this.vertexArray, data.vertices);
+        maptalks.Util.pushIn(this.elementArray, triangles);
 
         this._addTexCoords(data.vertices.length / 2, style);
         return this;
@@ -2566,7 +2570,7 @@ var PolygonPainter = function (_Painter) {
 
 PolygonPainter.mergeOptions(options$1);
 
-var maxUniformLength = Browser.ie || Browser.edge ? 504 : Util.IS_NODE ? 1014 : 240;
+var maxUniformLength = maptalks.Browser.ie || maptalks.Browser.edge ? 504 : maptalks.Util.IS_NODE ? 1014 : 240;
 
 var lineFragment = "#ifdef GL_ES\r\nprecision mediump float;\r\n#else\r\n#define lowp\r\n#define mediump\r\n#define highp\r\n#endif\r\n\r\nuniform float u_blur;\r\nuniform vec2 u_tex_size;\r\n\r\n// varying lowp vec4 v_color;\r\n// varying vec2 v_linenormal;\r\nvarying vec4 v_texcoord;\r\nvarying float v_opacity;\r\nvarying float v_linewidth;\r\nvarying float v_scale;\r\nvarying float v_texture_normal;\r\nvarying float v_linesofar;\r\n// varying float v_ruler;\r\n\r\nuniform sampler2D u_image;\r\n\r\nvoid main() {\r\n    vec4 color;\r\n    if (v_texcoord.q == -1.0) {\r\n        // is a texture fragment\r\n        float linesofar = v_linesofar / v_scale;\r\n        float texWidth = u_tex_size.x * v_texcoord.t;\r\n        float x = v_texcoord.s + mod(linesofar, texWidth) / texWidth * v_texcoord.t;\r\n        float y = (v_texture_normal + 1.0) / 2.0 * v_texcoord.p;\r\n\r\n        color = texture2D(u_image, vec2(x, y));\r\n    } else {\r\n        // a color fragment\r\n        color = v_texcoord;\r\n    }\r\n    float alpha = 1.0;\r\n    gl_FragColor = color * (alpha * v_opacity);\r\n#ifdef OVERDRAW_INSPECTOR\r\n    gl_FragColor = vec4(1.0);\r\n#endif\r\n}\r\n";
 
@@ -2647,7 +2651,7 @@ var BigDataLayer = function (_maptalks$Layer) {
     function BigDataLayer(id, data, options) {
         classCallCheck(this, BigDataLayer);
 
-        var opts = Util.extend({}, options);
+        var opts = maptalks.Util.extend({}, options);
         var style = void 0;
         if (opts['style']) {
             style = opts['style'];
@@ -2693,7 +2697,7 @@ var BigDataLayer = function (_maptalks$Layer) {
             style = [style];
         }
         this._style = style;
-        this._cookedStyles = MapboxUtil.compileStyle(style);
+        this._cookedStyles = maptalks.MapboxUtil.compileStyle(style);
 
         this.fire('setstyle', { 'style': style });
         return this;
@@ -2704,7 +2708,7 @@ var BigDataLayer = function (_maptalks$Layer) {
     };
 
     return BigDataLayer;
-}(Layer);
+}(maptalks.Layer);
 
 BigDataLayer.mergeOptions(options$2);
 
@@ -2955,10 +2959,10 @@ BigPointLayer.registerRenderer('webgl', function (_WebglRenderer) {
         var resources = [];
         if (this.layer.getStyle()) {
             this.layer.getStyle().forEach(function (s) {
-                var res = Util.getExternalResources(s['symbol'], true);
+                var res = maptalks.Util.getExternalResources(s['symbol'], true);
                 if (Array.isArray(res) && res.length > 0) {
                     if (Array.isArray(res[0])) {
-                        Util.pushIn(resources, res);
+                        maptalks.Util.pushIn(resources, res);
                     } else {
                         resources.push(res);
                     }
@@ -3030,7 +3034,7 @@ BigPointLayer.registerRenderer('webgl', function (_WebglRenderer) {
                 var tex = this._getTexCoord({ 'properties': point[2] });
                 if (tex) {
                     this._vertexCount++;
-                    var cp = map.coordinateToPoint(new Coordinate(point), targetZ);
+                    var cp = map.coordinateToPoint(new maptalks.Coordinate(point), targetZ);
                     vertexTexCoords[offset++] = cp.x;
                     vertexTexCoords[offset++] = cp.y;
                     vertexTexCoords[offset++] = tex.idx;
@@ -3146,7 +3150,7 @@ BigPointLayer.registerRenderer('webgl', function (_WebglRenderer) {
         if (this.layer.getStyle()) {
             var map = this.getMap();
             this.layer.getStyle().forEach(function (style) {
-                var marker = new Marker([0, 0], {
+                var marker = new maptalks.Marker([0, 0], {
                     'symbol': style['symbol']
                 });
                 var sprite = marker._getSprite(resources, map.CanvasClass);
@@ -5130,8 +5134,8 @@ var PathRenderer = function (_WebglRenderer) {
         var resources = [];
         if (this.layer._cookedStyles) {
             this.layer._cookedStyles.forEach(function (s) {
-                s['symbol'] = Util.convertResourceUrl(s['symbol']);
-                var res = Util.getExternalResources(s['symbol'], true);
+                s['symbol'] = maptalks.Util.convertResourceUrl(s['symbol']);
+                var res = maptalks.Util.getExternalResources(s['symbol'], true);
                 if (res) {
                     resources.push(res);
                 }
@@ -5220,7 +5224,7 @@ var PathRenderer = function (_WebglRenderer) {
                 if (sprite) {
                     fillSprites.push({
                         'canvas': sprite,
-                        'offset': new Point(0, 0)
+                        'offset': new maptalks.Point(0, 0)
                     });
                 }
             });
@@ -5652,7 +5656,7 @@ var ExtrudePainter = function (_Painter) {
                 }
             }
             if (this.options['project']) {
-                c = this.map.coordinateToPoint(new Coordinate(data.vertices[i], data.vertices[i + 1]), targetZ);
+                c = this.map.coordinateToPoint(new maptalks.Coordinate(data.vertices[i], data.vertices[i + 1]), targetZ);
                 bottom.push(c.x, c.y, 0);
                 top.push(c.x, c.y, height);
             } else {
@@ -5682,9 +5686,9 @@ var ExtrudePainter = function (_Painter) {
             });
         }
 
-        Util.pushIn(this.vertexArray, bottom);
+        maptalks.Util.pushIn(this.vertexArray, bottom);
 
-        Util.pushIn(this.elementArray, triangles);
+        maptalks.Util.pushIn(this.elementArray, triangles);
 
         for (var _i = 0; _i < count; _i++) {
             this.normalArray.push(0, 0, -1);
@@ -5696,9 +5700,9 @@ var ExtrudePainter = function (_Painter) {
             });
         }
 
-        Util.pushIn(this.vertexArray, top);
+        maptalks.Util.pushIn(this.vertexArray, top);
 
-        Util.pushIn(this.elementArray, triangles);
+        maptalks.Util.pushIn(this.elementArray, triangles);
 
         for (var _i2 = 0; _i2 < count; _i2++) {
             this.normalArray.push(0, 0, 1);
@@ -5913,6 +5917,15 @@ var ExtrudeRenderer = function (_PathRenderer) {
 
 ExtrudePolygonLayer.registerRenderer('webgl', ExtrudeRenderer);
 
-export { webgl, BigDataLayer, BigPointLayer, BigLineLayer, BigPolygonLayer, ExtrudePolygonLayer };
+exports.webgl = webgl;
+exports.BigDataLayer = BigDataLayer;
+exports.BigPointLayer = BigPointLayer;
+exports.BigLineLayer = BigLineLayer;
+exports.BigPolygonLayer = BigPolygonLayer;
+exports.ExtrudePolygonLayer = ExtrudePolygonLayer;
+
+Object.defineProperty(exports, '__esModule', { value: true });
 
 typeof console !== 'undefined' && console.log('maptalks.biglayer v0.4.0, requires maptalks@>=0.37.0.');
+
+})));
