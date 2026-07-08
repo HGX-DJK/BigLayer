@@ -345,15 +345,7 @@ export default class WebglRenderer extends maptalks.renderer.CanvasRenderer {
 
     }
 
-    onRemove() {
-        const gl = this.gl;
-        if (this._buffers) {
-            this._buffers.forEach(function (b) {
-                gl.deleteBuffer(b);
-            });
-            delete this._buffers;
-        }
-    }
+
 
     /**
      * Create the linked program object
@@ -462,7 +454,10 @@ export default class WebglRenderer extends maptalks.renderer.CanvasRenderer {
         const fov = map.getFov() * Math.PI / 180;
         const cameraToCenterDistance = 0.5 / Math.tan(fov / 2) * size.height * scale;
 
-        const m = mat4.create();
+        if (!this._calcMatrix) {
+            this._calcMatrix = mat4.create();
+        }
+        const m = this._calcMatrix;
         mat4.perspective(m, fov, size.width / size.height, 1, cameraToCenterDistance + 1E9);
         if (!maptalks.Util.IS_NODE) {
             // doesn't need to flip Y with headless-gl, unknown reason
@@ -479,7 +474,10 @@ export default class WebglRenderer extends maptalks.renderer.CanvasRenderer {
         const map = this.getMap();
         if (map.projViewMatrix) {
             const targetZ = getTargetZoom(map);
-            const m = mat4.create();
+            if (!this._projMatrix) {
+                this._projMatrix = mat4.create();
+            }
+            const m = this._projMatrix;
             mat4.copy(m, map.projViewMatrix);
             // Scale it to accept coordinates projected at targetZ resolution
             const s = map.getResolution(targetZ) / map.getGLRes();
@@ -493,9 +491,15 @@ export default class WebglRenderer extends maptalks.renderer.CanvasRenderer {
         const fov = map.getFov() * Math.PI / 180;
         const maxScale = map.getScale(map.getMinZoom()) / map.getScale(map.getMaxNativeZoom());
         const farZ = maxScale * size.height / 2 / this._getFovRatio();
-        const m = mat4.create();
+        if (!this._projMatrix) {
+            this._projMatrix = mat4.create();
+        }
+        const m = this._projMatrix;
         mat4.perspective(m, fov, size.width / size.height, 1, farZ);
-        const m1 = mat4.create();
+        if (!this._m1) {
+            this._m1 = mat4.create();
+        }
+        const m1 = this._m1;
         if (!maptalks.Util.IS_NODE) {
             // doesn't need to flip Y with headless-gl, unknown reason
             mat4.scale(m, m, [1, -1, 1]);
@@ -535,7 +539,10 @@ export default class WebglRenderer extends maptalks.renderer.CanvasRenderer {
         // let up = new vec3(0,1,0);
         // up.rotateZ(target,radians);
         const up = [Math.sin(bearing), Math.cos(bearing), 0];
-        const m = mat4.create();
+        if (!this._viewMatrix) {
+            this._viewMatrix = mat4.create();
+        }
+        const m = this._viewMatrix;
         mat4.lookAt(m, [cx, cy, cz], [center2D.x, center2D.y, 0], up);
         return m;
     }

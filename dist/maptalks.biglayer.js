@@ -1129,16 +1129,6 @@ var WebglRenderer = function (_maptalks$renderer$Ca) {
         }
     };
 
-    WebglRenderer.prototype.onRemove = function onRemove() {
-        var gl = this.gl;
-        if (this._buffers) {
-            this._buffers.forEach(function (b) {
-                gl.deleteBuffer(b);
-            });
-            delete this._buffers;
-        }
-    };
-
     WebglRenderer.prototype.createProgram = function createProgram(vshader, fshader, uniforms) {
         var gl = this.gl;
 
@@ -1232,7 +1222,10 @@ var WebglRenderer = function (_maptalks$renderer$Ca) {
         var fov = map.getFov() * Math.PI / 180;
         var cameraToCenterDistance = 0.5 / Math.tan(fov / 2) * size.height * scale$$1;
 
-        var m = create$3();
+        if (!this._calcMatrix) {
+            this._calcMatrix = create$3();
+        }
+        var m = this._calcMatrix;
         perspective(m, fov, size.width / size.height, 1, cameraToCenterDistance + 1E9);
         if (!maptalks.Util.IS_NODE) {
             scale$3(m, m, [1, -1, 1]);
@@ -1248,7 +1241,10 @@ var WebglRenderer = function (_maptalks$renderer$Ca) {
         var map = this.getMap();
         if (map.projViewMatrix) {
             var targetZ = getTargetZoom(map);
-            var _m = create$3();
+            if (!this._projMatrix) {
+                this._projMatrix = create$3();
+            }
+            var _m = this._projMatrix;
             copy$3(_m, map.projViewMatrix);
 
             var s = map.getResolution(targetZ) / map.getGLRes();
@@ -1261,9 +1257,15 @@ var WebglRenderer = function (_maptalks$renderer$Ca) {
         var fov = map.getFov() * Math.PI / 180;
         var maxScale = map.getScale(map.getMinZoom()) / map.getScale(map.getMaxNativeZoom());
         var farZ = maxScale * size.height / 2 / this._getFovRatio();
-        var m = create$3();
+        if (!this._projMatrix) {
+            this._projMatrix = create$3();
+        }
+        var m = this._projMatrix;
         perspective(m, fov, size.width / size.height, 1, farZ);
-        var m1 = create$3();
+        if (!this._m1) {
+            this._m1 = create$3();
+        }
+        var m1 = this._m1;
         if (!maptalks.Util.IS_NODE) {
             scale$3(m, m, [1, -1, 1]);
         }
@@ -1297,7 +1299,10 @@ var WebglRenderer = function (_maptalks$renderer$Ca) {
         var cy = center2D.y + dist * Math.cos(bearing);
 
         var up = [Math.sin(bearing), Math.cos(bearing), 0];
-        var m = create$3();
+        if (!this._viewMatrix) {
+            this._viewMatrix = create$3();
+        }
+        var m = this._viewMatrix;
         lookAt(m, [cx, cy, cz], [center2D.x, center2D.y, 0], up);
         return m;
     };
