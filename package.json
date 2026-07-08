@@ -1,0 +1,49 @@
+{
+  "name": "maptalks.biglayer",
+  "version": "0.4.0",
+  "description": "A maptalks layer to render millions of data with WebGL",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/maptalks/maptalks.biglayer.git"
+  },
+  "main": "dist/maptalks.biglayer.js",
+  "module": "dist/maptalks.biglayer.es.js",
+  "jsnext:main": "dist/maptalks.biglayer.es.js",
+  "scripts": {
+    "preversion": "npm run lint",
+    "version": "gulp minify && git add -A dist",
+    "lint": "eslint src/**/*.js test/**/*.js",
+    "test": "gulp test",
+    "pretest": "npm run lint",
+    "build": "gulp minify",
+    "prepublish": "npm run lint && gulp minify",
+    "dev": "gulp"
+  },
+  "devDependencies": {
+    "babel-eslint": "^7.1.1",
+    "babel-plugin-external-helpers": "^6.18.0",
+    "babel-preset-es2015": "^6.18.0",
+    "eslint": "^2.4.0",
+    "eslint-config-maptalks": "^0.2.2",
+    "gulp": "^3.9.0",
+    "gulp-connect": "^5.0.0",
+    "maptalks": "<2.0.0",
+    "maptalks-build-helpers": "^0.4.2"
+  },
+  "dependencies": {
+    "@mapbox/gl-matrix": "^0.0.1",
+    "@mapbox/point-geometry": "^0.1.0",
+    "color": "^0.11.3",
+    "earcut": "^2.1.1",
+    "kdbush": "^1.0.1",
+    "rbush": "^2.0.1"
+  },
+  "peerDependencies": {
+    "maptalks": ">=0.37.0"
+  },
+  "resolutions": {
+    "natives": "1.1.6",
+    "graceful-fs": "^4.2.11"
+  }
+}
