@@ -58,6 +58,9 @@ function setupBlend(gl, compOp) {
 export default class WebglRenderer extends maptalks.renderer.CanvasRenderer {
 
     needToRedraw() {
+        if (this._isContextLost) {
+            return false;
+        }
         const map = this.getMap();
         if (map.projViewMatrix) {
             if (map.isInteracting() || map.getRenderer().isViewChanged()) {
@@ -85,6 +88,52 @@ export default class WebglRenderer extends maptalks.renderer.CanvasRenderer {
             this.buffer = maptalks.Canvas.createCanvas(this.canvas.width, this.canvas.height, this.getMap().CanvasClass);
             this.context = this.buffer.getContext('2d');
         }
+
+        this._onContextLost = this._onContextLost || this._handleContextLost.bind(this);
+        this._onContextRestored = this._onContextRestored || this._handleContextRestored.bind(this);
+        this.canvas.addEventListener('webglcontextlost', this._onContextLost, false);
+        this.canvas.addEventListener('webglcontextrestored', this._onContextRestored, false);
+    }
+
+    _handleContextLost(e) {
+        e.preventDefault();
+        this._isContextLost = true;
+        
+        const win = typeof window !== 'undefined' ? window : {};
+        for (const p in this) {
+            const val = this[p];
+            if (val && (
+                (win.WebGLBuffer && val instanceof win.WebGLBuffer) ||
+                (win.WebGLTexture && val instanceof win.WebGLTexture) ||
+                (win.WebGLProgram && val instanceof win.WebGLProgram) ||
+                (win.WebGLShader && val instanceof win.WebGLShader)
+            )) {
+                delete this[p];
+            }
+        }
+        this._buffers = [];
+        this._textures = [];
+        this._programs = [];
+        this._shaders = [];
+    }
+
+    _handleContextRestored(e) {
+        this._isContextLost = false;
+        this.createContext();
+        
+        const renderer = this.layer.getRenderer();
+        if (renderer && renderer._vertexCount !== undefined) {
+            renderer._vertexCount = 0;
+        }
+        if (renderer && renderer._textureLoaded !== undefined) {
+            renderer._textureLoaded = false;
+        }
+        if (renderer && renderer._fillTextureLoaded !== undefined) {
+            renderer._fillTextureLoaded = false;
+        }
+        
+        this.setToRedraw();
+        this.layer.fire('webglcontextrestored');
     }
 
     createContext() {
@@ -105,6 +154,48 @@ export default class WebglRenderer extends maptalks.renderer.CanvasRenderer {
 
     onContextCreate() {
 
+    }
+
+    onRemove() {
+        if (this.canvas) {
+            this.canvas.removeEventListener('webglcontextlost', this._onContextLost, false);
+            this.canvas.removeEventListener('webglcontextrestored', this._onContextRestored, false);
+        }
+        const gl = this.gl;
+        if (gl) {
+            if (this._buffers) {
+                this._buffers.forEach(buffer => {
+                    gl.deleteBuffer(buffer);
+                });
+                delete this._buffers;
+            }
+            if (this._textures) {
+                this._textures.forEach(texture => {
+                    gl.deleteTexture(texture);
+                });
+                delete this._textures;
+            }
+            if (this._programs) {
+                this._programs.forEach(program => {
+                    gl.deleteProgram(program);
+                });
+                delete this._programs;
+            }
+            if (this._shaders) {
+                this._shaders.forEach(shader => {
+                    gl.deleteShader(shader);
+                });
+                delete this._shaders;
+            }
+        }
+        delete this.gl;
+        if (this.buffer) {
+            delete this.buffer;
+        }
+        if (this.context) {
+            delete this.context;
+        }
+        super.onRemove.apply(this, arguments);
     }
 
     resizeCanvas(canvasSize) {
@@ -279,11 +370,21 @@ export default class WebglRenderer extends maptalks.renderer.CanvasRenderer {
             return null;
         }
 
+        if (!this._shaders) {
+            this._shaders = [];
+        }
+        this._shaders.push(vertexShader, fragmentShader);
+
       // Create a program object
         const program = gl.createProgram();
         if (!program) {
             return null;
         }
+
+        if (!this._programs) {
+            this._programs = [];
+        }
+        this._programs.push(program);
 
       // Attach the shader objects
         gl.attachShader(program, vertexShader);
@@ -320,6 +421,10 @@ export default class WebglRenderer extends maptalks.renderer.CanvasRenderer {
         if (!texture) {
             throw new Error('Failed to create the texture object');
         }
+        if (!this._textures) {
+            this._textures = [];
+        }
+        this._textures.push(texture);
         if (!texIdx) {
             texIdx = 0;
         }

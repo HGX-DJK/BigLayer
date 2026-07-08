@@ -851,6 +851,9 @@ var WebglRenderer = function (_maptalks$renderer$Ca) {
     }
 
     WebglRenderer.prototype.needToRedraw = function needToRedraw() {
+        if (this._isContextLost) {
+            return false;
+        }
         var map = this.getMap();
         if (map.projViewMatrix) {
             if (map.isInteracting() || map.getRenderer().isViewChanged()) {
@@ -878,6 +881,47 @@ var WebglRenderer = function (_maptalks$renderer$Ca) {
             this.buffer = Canvas.createCanvas(this.canvas.width, this.canvas.height, this.getMap().CanvasClass);
             this.context = this.buffer.getContext('2d');
         }
+
+        this._onContextLost = this._onContextLost || this._handleContextLost.bind(this);
+        this._onContextRestored = this._onContextRestored || this._handleContextRestored.bind(this);
+        this.canvas.addEventListener('webglcontextlost', this._onContextLost, false);
+        this.canvas.addEventListener('webglcontextrestored', this._onContextRestored, false);
+    };
+
+    WebglRenderer.prototype._handleContextLost = function _handleContextLost(e) {
+        e.preventDefault();
+        this._isContextLost = true;
+
+        var win = typeof window !== 'undefined' ? window : {};
+        for (var p in this) {
+            var val = this[p];
+            if (val && (win.WebGLBuffer && val instanceof win.WebGLBuffer || win.WebGLTexture && val instanceof win.WebGLTexture || win.WebGLProgram && val instanceof win.WebGLProgram || win.WebGLShader && val instanceof win.WebGLShader)) {
+                delete this[p];
+            }
+        }
+        this._buffers = [];
+        this._textures = [];
+        this._programs = [];
+        this._shaders = [];
+    };
+
+    WebglRenderer.prototype._handleContextRestored = function _handleContextRestored(e) {
+        this._isContextLost = false;
+        this.createContext();
+
+        var renderer$$1 = this.layer.getRenderer();
+        if (renderer$$1 && renderer$$1._vertexCount !== undefined) {
+            renderer$$1._vertexCount = 0;
+        }
+        if (renderer$$1 && renderer$$1._textureLoaded !== undefined) {
+            renderer$$1._textureLoaded = false;
+        }
+        if (renderer$$1 && renderer$$1._fillTextureLoaded !== undefined) {
+            renderer$$1._fillTextureLoaded = false;
+        }
+
+        this.setToRedraw();
+        this.layer.fire('webglcontextrestored');
     };
 
     WebglRenderer.prototype.createContext = function createContext() {
@@ -897,6 +941,48 @@ var WebglRenderer = function (_maptalks$renderer$Ca) {
     };
 
     WebglRenderer.prototype.onContextCreate = function onContextCreate() {};
+
+    WebglRenderer.prototype.onRemove = function onRemove() {
+        if (this.canvas) {
+            this.canvas.removeEventListener('webglcontextlost', this._onContextLost, false);
+            this.canvas.removeEventListener('webglcontextrestored', this._onContextRestored, false);
+        }
+        var gl = this.gl;
+        if (gl) {
+            if (this._buffers) {
+                this._buffers.forEach(function (buffer) {
+                    gl.deleteBuffer(buffer);
+                });
+                delete this._buffers;
+            }
+            if (this._textures) {
+                this._textures.forEach(function (texture) {
+                    gl.deleteTexture(texture);
+                });
+                delete this._textures;
+            }
+            if (this._programs) {
+                this._programs.forEach(function (program) {
+                    gl.deleteProgram(program);
+                });
+                delete this._programs;
+            }
+            if (this._shaders) {
+                this._shaders.forEach(function (shader) {
+                    gl.deleteShader(shader);
+                });
+                delete this._shaders;
+            }
+        }
+        delete this.gl;
+        if (this.buffer) {
+            delete this.buffer;
+        }
+        if (this.context) {
+            delete this.context;
+        }
+        _maptalks$renderer$Ca.prototype.onRemove.apply(this, arguments);
+    };
 
     WebglRenderer.prototype.resizeCanvas = function resizeCanvas(canvasSize) {
         if (!this.canvas) {
@@ -1058,10 +1144,20 @@ var WebglRenderer = function (_maptalks$renderer$Ca) {
             return null;
         }
 
+        if (!this._shaders) {
+            this._shaders = [];
+        }
+        this._shaders.push(vertexShader, fragmentShader);
+
         var program = gl.createProgram();
         if (!program) {
             return null;
         }
+
+        if (!this._programs) {
+            this._programs = [];
+        }
+        this._programs.push(program);
 
         gl.attachShader(program, vertexShader);
         gl.attachShader(program, fragmentShader);
@@ -1095,6 +1191,10 @@ var WebglRenderer = function (_maptalks$renderer$Ca) {
         if (!texture) {
             throw new Error('Failed to create the texture object');
         }
+        if (!this._textures) {
+            this._textures = [];
+        }
+        this._textures.push(texture);
         if (!texIdx) {
             texIdx = 0;
         }
@@ -2524,7 +2624,7 @@ var webgl = Object.freeze({
 
 var options$2 = {
     'renderer': 'webgl',
-    'doublBuffer': true,
+    'doubleBuffer': true,
     'renderOnMoving': false,
     'renderOnZooming': false
 };
@@ -2890,7 +2990,8 @@ BigPointLayer.registerRenderer('webgl', function (_WebglRenderer) {
             var map = this.getMap(),
                 targetZ = getTargetZoom(map);
             var data = this.layer.data;
-            var vertexTexCoords = [];
+            var vertexTexCoords = new Float32Array(data.length * 3);
+            var offset = 0;
             var points = [];
             this._vertexCount = 0;
             var gl = this.gl;
@@ -2911,7 +3012,9 @@ BigPointLayer.registerRenderer('webgl', function (_WebglRenderer) {
                 if (tex) {
                     this._vertexCount++;
                     var cp = map.coordinateToPoint(new Coordinate(point), targetZ);
-                    vertexTexCoords.push(cp.x, cp.y, tex.idx);
+                    vertexTexCoords[offset++] = cp.x;
+                    vertexTexCoords[offset++] = cp.y;
+                    vertexTexCoords[offset++] = tex.idx;
                     points.push([cp.x, cp.y, tex.size, tex.offset, point]);
 
                     if (tex.size[0] > maxIconSize[0]) {
@@ -2922,7 +3025,7 @@ BigPointLayer.registerRenderer('webgl', function (_WebglRenderer) {
                     }
                 }
             }
-            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertexTexCoords), gl.STATIC_DRAW);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertexTexCoords.buffer, 0, offset), gl.STATIC_DRAW);
 
             this._maxIconSize = maxIconSize;
             this._indexData(points);

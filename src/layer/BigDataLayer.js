@@ -2,7 +2,7 @@ import * as maptalks from 'maptalks';
 
 const options = {
     'renderer' : 'webgl',
-    'doublBuffer' : true,
+    'doubleBuffer' : true,
     'renderOnMoving' : false,
     'renderOnZooming' : false
 };

@@ -72,7 +72,8 @@ BigPointLayer.registerRenderer('webgl', class extends WebglRenderer {
             const map = this.getMap(),
                 targetZ = getTargetZoom(map);
             const data = this.layer.data;
-            const vertexTexCoords = [];
+            const vertexTexCoords = new Float32Array(data.length * 3);
+            let offset = 0;
             const points = [];
             this._vertexCount = 0;
             const gl = this.gl;
@@ -93,7 +94,9 @@ BigPointLayer.registerRenderer('webgl', class extends WebglRenderer {
                 if (tex) {
                     this._vertexCount++;
                     const cp = map.coordinateToPoint(new maptalks.Coordinate(point), targetZ);
-                    vertexTexCoords.push(cp.x, cp.y, tex.idx);
+                    vertexTexCoords[offset++] = cp.x;
+                    vertexTexCoords[offset++] = cp.y;
+                    vertexTexCoords[offset++] = tex.idx;
                     points.push([cp.x, cp.y, tex.size, tex.offset, point]);
                     // find max size of icons, will use it for identify tolerance.
                     if (tex.size[0] > maxIconSize[0]) {
@@ -104,7 +107,7 @@ BigPointLayer.registerRenderer('webgl', class extends WebglRenderer {
                     }
                 }
             }
-            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertexTexCoords), gl.STATIC_DRAW);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertexTexCoords.buffer, 0, offset), gl.STATIC_DRAW);
 
             this._maxIconSize = maxIconSize;
             this._indexData(points);
