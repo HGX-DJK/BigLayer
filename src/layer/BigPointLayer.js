@@ -61,7 +61,7 @@ BigPointLayer.registerRenderer('webgl', class extends WebglRenderer {
         const uniforms = ['u_matrix', 'u_scale', 'u_viewportSize', 'u_sprite[0]'];
         const program = this.createProgram(shaders.point.vertexSource, shaders.point.fragmentSource, uniforms);
         this.useProgram(program);
-        
+
         // 1. Setup quad buffer for instancing
         const quadBuffer = this.createBuffer();
         gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
@@ -77,7 +77,7 @@ BigPointLayer.registerRenderer('webgl', class extends WebglRenderer {
         this.enableVertexAttrib([
             ['a_quad_pos', 2]
         ]);
-        
+
         // 2. Setup instanced data buffer
         this._instancedBuffer = this.createBuffer();
         gl.bindBuffer(gl.ARRAY_BUFFER, this._instancedBuffer);
@@ -85,7 +85,7 @@ BigPointLayer.registerRenderer('webgl', class extends WebglRenderer {
             ['a_pos', 2],
             ['a_sprite_idx', 1]
         ]);
-        
+
         // Set divisor for instanced attributes
         if (this.ext) {
             const posLoc = gl.getAttribLocation(program, 'a_pos');
@@ -301,7 +301,7 @@ BigPointLayer.registerRenderer('webgl', class extends WebglRenderer {
         gl.uniformMatrix4fv(gl.program.u_matrix, false, m);
         const map = this.getMap();
         gl.uniform1f(gl.program.u_scale, map.getScale() / map.getScale(getTargetZoom(map)));
-        
+
         gl.uniform2f(gl.program.u_viewportSize, this.canvas.width, this.canvas.height);
 
         if (this.ext) {

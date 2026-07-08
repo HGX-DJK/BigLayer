@@ -98,7 +98,7 @@ export default class WebglRenderer extends maptalks.renderer.CanvasRenderer {
     _handleContextLost(e) {
         e.preventDefault();
         this._isContextLost = true;
-        
+
         const win = typeof window !== 'undefined' ? window : {};
         for (const p in this) {
             const val = this[p];
@@ -120,7 +120,7 @@ export default class WebglRenderer extends maptalks.renderer.CanvasRenderer {
     _handleContextRestored(e) {
         this._isContextLost = false;
         this.createContext();
-        
+
         const renderer = this.layer.getRenderer();
         if (renderer && renderer._vertexCount !== undefined) {
             renderer._vertexCount = 0;
@@ -131,7 +131,7 @@ export default class WebglRenderer extends maptalks.renderer.CanvasRenderer {
         if (renderer && renderer._fillTextureLoaded !== undefined) {
             renderer._fillTextureLoaded = false;
         }
-        
+
         this.setToRedraw();
         this.layer.fire('webglcontextrestored');
     }

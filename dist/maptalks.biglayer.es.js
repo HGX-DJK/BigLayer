@@ -1688,6 +1688,83 @@ Point$1.convert = function (a) {
     return a;
 };
 
+var DynamicBuffer = function () {
+    function DynamicBuffer() {
+        var initialVertexCapacity = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : 65536;
+        var initialElementCapacity = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : 65536;
+        classCallCheck(this, DynamicBuffer);
+
+        this.vertexArray = new Float32Array(initialVertexCapacity);
+        this.vertexOffset = 0;
+
+        this.elementArray = new Uint32Array(initialElementCapacity);
+        this.elementOffset = 0;
+    }
+
+    DynamicBuffer.prototype.pushVertex = function pushVertex() {
+        for (var _len = arguments.length, args = Array(_len), _key = 0; _key < _len; _key++) {
+            args[_key] = arguments[_key];
+        }
+
+        var len = args.length;
+        if (this.vertexOffset + len > this.vertexArray.length) {
+            var newArray = new Float32Array(this.vertexArray.length * 2 + len);
+            newArray.set(this.vertexArray);
+            this.vertexArray = newArray;
+        }
+        for (var i = 0; i < len; i++) {
+            this.vertexArray[this.vertexOffset++] = args[i];
+        }
+    };
+
+    DynamicBuffer.prototype.pushVertexArray = function pushVertexArray(arr) {
+        var len = arr.length;
+        if (this.vertexOffset + len > this.vertexArray.length) {
+            var newArray = new Float32Array(Math.max(this.vertexArray.length * 2, this.vertexOffset + len));
+            newArray.set(this.vertexArray);
+            this.vertexArray = newArray;
+        }
+        this.vertexArray.set(arr, this.vertexOffset);
+        this.vertexOffset += len;
+    };
+
+    DynamicBuffer.prototype.pushElement = function pushElement() {
+        for (var _len2 = arguments.length, args = Array(_len2), _key2 = 0; _key2 < _len2; _key2++) {
+            args[_key2] = arguments[_key2];
+        }
+
+        var len = args.length;
+        if (this.elementOffset + len > this.elementArray.length) {
+            var newArray = new Uint32Array(this.elementArray.length * 2 + len);
+            newArray.set(this.elementArray);
+            this.elementArray = newArray;
+        }
+        for (var i = 0; i < len; i++) {
+            this.elementArray[this.elementOffset++] = args[i];
+        }
+    };
+
+    DynamicBuffer.prototype.pushElementArray = function pushElementArray(arr) {
+        var len = arr.length;
+        if (this.elementOffset + len > this.elementArray.length) {
+            var newArray = new Uint32Array(Math.max(this.elementArray.length * 2, this.elementOffset + len));
+            newArray.set(this.elementArray);
+            this.elementArray = newArray;
+        }
+        this.elementArray.set(arr, this.elementOffset);
+        this.elementOffset += len;
+    };
+
+    DynamicBuffer.prototype.getArrays = function getArrays() {
+        return {
+            vertexArray: new Float32Array(this.vertexArray.buffer, 0, this.vertexOffset),
+            elementArray: new Uint32Array(this.elementArray.buffer, 0, this.elementOffset)
+        };
+    };
+
+    return DynamicBuffer;
+}();
+
 var options = {
     'project': true
 };
@@ -1700,23 +1777,16 @@ var LinePainter = function (_Painter) {
 
         var _this = possibleConstructorReturn(this, _Painter.call(this, gl, map, options));
 
-        _this.vertexArray = [];
-        _this.normalArray = [];
-        _this.elementArray = [];
-        _this.styleArray = [];
-
-
+        _this.buffer = new DynamicBuffer();
+        _this._vertexCount = 0;
         _this.distance = 0;
+
+        _this.bboxes = [];
         return _this;
     }
 
     LinePainter.prototype.getArrays = function getArrays() {
-        return {
-            'vertexArray': this.vertexArray,
-            'normalArray': this.normalArray,
-            'elementArray': this.elementArray,
-            'styleArray': this.styleArray
-        };
+        return this.buffer.getArrays();
     };
 
     LinePainter.prototype.addLine = function addLine(line, style) {
@@ -1726,8 +1796,6 @@ var LinePainter = function (_Painter) {
         if (style.symbol['lineWidth'] <= 0 || style.symbol['lineOpacity'] <= 0) {
             return this;
         }
-
-        var preVertexLen = this.vertexArray.length;
 
         var vertice = this._getVertice(line);
 
@@ -1739,8 +1807,13 @@ var LinePainter = function (_Painter) {
         }
 
         this._prepareToAdd();
+        this._currentStyleValue = this._computeStyleValue(style);
 
         var targetZ = getTargetZoom(this.map);
+        var minX = Infinity,
+            minY = Infinity,
+            maxX = -Infinity,
+            maxY = -Infinity;
 
         var currentVertex = void 0,
             nextVertex = void 0;
@@ -1750,35 +1823,45 @@ var LinePainter = function (_Painter) {
                 vertex = this.map.coordinateToPoint(new Coordinate(vertex), targetZ).toArray();
             }
             currentVertex = pointGeometry.convert(vertex);
+
+            if (currentVertex.x < minX) minX = currentVertex.x;
+            if (currentVertex.y < minY) minY = currentVertex.y;
+            if (currentVertex.x > maxX) maxX = currentVertex.x;
+            if (currentVertex.y > maxY) maxY = currentVertex.y;
+
             if (_i < _l - 1) {
-                vertex = vertice[_i + 1];
+                var nv = vertice[_i + 1];
                 if (this.options['project']) {
-                    vertex = this.map.coordinateToPoint(new Coordinate(vertex), targetZ).toArray();
+                    nv = this.map.coordinateToPoint(new Coordinate(nv), targetZ).toArray();
                 }
-                nextVertex = pointGeometry.convert(vertex);
+                nextVertex = pointGeometry.convert(nv);
             } else {
                 nextVertex = null;
             }
             this.addCurrentVertex(currentVertex, nextVertex);
         }
 
-        var count = this.vertexArray.length - preVertexLen;
-
-        this._addTexCoords(count, style);
+        if (minX !== Infinity) {
+            this.bboxes.push({
+                minX: minX,
+                minY: minY,
+                maxX: maxX,
+                maxY: maxY,
+                data: line
+            });
+        }
         return this;
     };
 
     LinePainter.prototype.addCurrentVertex = function addCurrentVertex(currentVertex, nextVertex) {
         if (!this.preVertex) {
             this.e1 = this.e2 = this.e3 = -1;
-
             this._waitForLeftCap = true;
             this.preVertex = currentVertex;
             return;
         }
 
         var normal = currentVertex.sub(this.preVertex)._unit()._perp()._mult(-1);
-
         var nextNormal = void 0;
         if (nextVertex) {
             nextNormal = nextVertex.sub(currentVertex)._unit()._perp()._mult(-1);
@@ -1787,7 +1870,6 @@ var LinePainter = function (_Painter) {
         var preJoinNormal = this._getStartNormal(normal, this.preNormal);
 
         this._addLineEndVertexs(this.preVertex, preJoinNormal, this.distance);
-
         this.distance += currentVertex.dist(this.preVertex);
 
         if (!nextVertex) {
@@ -1801,38 +1883,31 @@ var LinePainter = function (_Painter) {
 
     LinePainter.prototype._prepareToAdd = function _prepareToAdd() {
         this.distance = 0;
-
         delete this.preVertex;
         delete this.preNormal;
     };
 
     LinePainter.prototype._addLineEndVertexs = function _addLineEndVertexs(vertex, joinNormal, linesofar) {
         var extrude = joinNormal.normal[0];
-
         this.e3 = this._addVertex(vertex, extrude, linesofar);
         if (this.e1 >= 0 && this.e2 >= 0) {
-            this.elementArray.push(this.e1, this.e2, this.e3);
+            this.buffer.pushElement(this.e1, this.e2, this.e3);
         }
         this.e1 = this.e2;
         this.e2 = this.e3;
 
         extrude = joinNormal.normal[1];
-
         this.e3 = this._addVertex(vertex, extrude, linesofar);
         if (this.e1 >= 0 && this.e2 >= 0) {
-            this.elementArray.push(this.e1, this.e2, this.e3);
+            this.buffer.pushElement(this.e1, this.e2, this.e3);
         }
         this.e1 = this.e2;
         this.e2 = this.e3;
     };
 
     LinePainter.prototype._addVertex = function _addVertex(currentVertex, normal, linesofar) {
-        this.vertexArray.push(currentVertex.x, currentVertex.y);
-
-        var normals = [this._precise(normal.x), this._precise(normal.y), linesofar];
-        var n = this.normalArray.length / normals.length;
-        Util.pushIn(this.normalArray, normals);
-        return n;
+        this.buffer.pushVertex(currentVertex.x, currentVertex.y, this._precise(normal.x), this._precise(normal.y), linesofar, this._currentStyleValue);
+        return this._vertexCount++;
     };
 
     LinePainter.prototype._getVertice = function _getVertice(line) {
@@ -1844,13 +1919,10 @@ var LinePainter = function (_Painter) {
         return line;
     };
 
-    LinePainter.prototype._addTexCoords = function _addTexCoords(n, style) {
+    LinePainter.prototype._computeStyleValue = function _computeStyleValue(style) {
         var v = (style.symbol['lineWidth'] || 2) / 2 * 100 + (style.symbol['lineOpacity'] || 1) * 10;
-
         v = v * 10000 + style.index;
-        for (var i = 0; i < n; i++) {
-            this.styleArray.push(v);
-        }
+        return v;
     };
 
     LinePainter.prototype._getStartNormal = function _getStartNormal(normal, preNormal) {
@@ -2470,18 +2542,14 @@ var PolygonPainter = function (_Painter) {
 
         var _this = possibleConstructorReturn(this, _Painter.call(this, gl, map, options));
 
-        _this.vertexArray = [];
-        _this.elementArray = [];
-        _this.styleArray = [];
+        _this.buffer = new DynamicBuffer();
+        _this._vertexCount = 0;
+        _this.bboxes = [];
         return _this;
     }
 
     PolygonPainter.prototype.getArrays = function getArrays() {
-        return {
-            'vertexArray': this.vertexArray,
-            'elementArray': this.elementArray,
-            'styleArray': this.styleArray
-        };
+        return this.buffer.getArrays();
     };
 
     PolygonPainter.prototype.addPolygon = function addPolygon(polygon, style) {
@@ -2513,15 +2581,25 @@ var PolygonPainter = function (_Painter) {
         var targetZ = getTargetZoom(this.map);
         var data = earcut_1.flatten(vertice);
 
+        var minX = Infinity,
+            minY = Infinity,
+            maxX = -Infinity,
+            maxY = -Infinity;
+
         if (this.options['project']) {
             var v = [];
             var c = void 0;
             for (var _i = 0, _l = data.vertices.length; _i < _l; _i += 2) {
                 c = this.map.coordinateToPoint(new Coordinate(data.vertices[_i], data.vertices[_i + 1]), targetZ);
+                if (c.x < minX) minX = c.x;
+                if (c.y < minY) minY = c.y;
+                if (c.x > maxX) maxX = c.x;
+                if (c.y > maxY) maxY = c.y;
                 v.push(c.x, c.y);
             }
             data.vertices = v;
         }
+
         var triangles = earcut_1(data.vertices, data.holes, 2);
         if (triangles.length <= 2) {
             return this;
@@ -2533,16 +2611,33 @@ var PolygonPainter = function (_Painter) {
             }
             return this;
         }
-        var count = this.vertexArray.length / 2;
+
+        if (minX !== Infinity) {
+            this.bboxes.push({
+                minX: minX,
+                minY: minY,
+                maxX: maxX,
+                maxY: maxY,
+                data: polygon
+            });
+        }
+
+        var styleValue = this._computeStyleValue(style);
+        var count = this._vertexCount;
+
         if (count > 0) {
             triangles = triangles.map(function (e) {
                 return e + count;
             });
         }
-        Util.pushIn(this.vertexArray, data.vertices);
-        Util.pushIn(this.elementArray, triangles);
 
-        this._addTexCoords(data.vertices.length / 2, style);
+        for (var _i2 = 0; _i2 < data.vertices.length; _i2 += 2) {
+            this.buffer.pushVertex(data.vertices[_i2], data.vertices[_i2 + 1], styleValue);
+            this._vertexCount++;
+        }
+
+        this.buffer.pushElementArray(triangles);
+
         return this;
     };
 
@@ -2555,11 +2650,8 @@ var PolygonPainter = function (_Painter) {
         return geo;
     };
 
-    PolygonPainter.prototype._addTexCoords = function _addTexCoords(n, style) {
-        var v = style.index * 100 + (style.symbol['polygonOpacity'] || 1) * 10;
-        for (var i = 0; i < n; i++) {
-            this.styleArray.push(v);
-        }
+    PolygonPainter.prototype._computeStyleValue = function _computeStyleValue(style) {
+        return style.index * 100 + (style.symbol['polygonOpacity'] || 1) * 10;
     };
 
     PolygonPainter.prototype._equalCoord = function _equalCoord(c1, c2) {
@@ -5302,6 +5394,582 @@ var PathRenderer = function (_WebglRenderer) {
     return PathRenderer;
 }(WebglRenderer);
 
+var quickselect = partialSort;
+
+function partialSort(arr, k, left, right, compare) {
+    left = left || 0;
+    right = right || arr.length - 1;
+    compare = compare || defaultCompare;
+
+    while (right > left) {
+        if (right - left > 600) {
+            var n = right - left + 1;
+            var m = k - left + 1;
+            var z = Math.log(n);
+            var s = 0.5 * Math.exp(2 * z / 3);
+            var sd = 0.5 * Math.sqrt(z * s * (n - s) / n) * (m - n / 2 < 0 ? -1 : 1);
+            var newLeft = Math.max(left, Math.floor(k - m * s / n + sd));
+            var newRight = Math.min(right, Math.floor(k + (n - m) * s / n + sd));
+            partialSort(arr, k, newLeft, newRight, compare);
+        }
+
+        var t = arr[k];
+        var i = left;
+        var j = right;
+
+        swap$1(arr, left, k);
+        if (compare(arr[right], t) > 0) swap$1(arr, left, right);
+
+        while (i < j) {
+            swap$1(arr, i, j);
+            i++;
+            j--;
+            while (compare(arr[i], t) < 0) {
+                i++;
+            }while (compare(arr[j], t) > 0) {
+                j--;
+            }
+        }
+
+        if (compare(arr[left], t) === 0) swap$1(arr, left, j);else {
+            j++;
+            swap$1(arr, j, right);
+        }
+
+        if (j <= k) left = j + 1;
+        if (k <= j) right = j - 1;
+    }
+}
+
+function swap$1(arr, i, j) {
+    var tmp = arr[i];
+    arr[i] = arr[j];
+    arr[j] = tmp;
+}
+
+function defaultCompare(a, b) {
+    return a < b ? -1 : a > b ? 1 : 0;
+}
+
+var rbush_1 = rbush;
+
+function rbush(maxEntries, format) {
+    if (!(this instanceof rbush)) return new rbush(maxEntries, format);
+
+    this._maxEntries = Math.max(4, maxEntries || 9);
+    this._minEntries = Math.max(2, Math.ceil(this._maxEntries * 0.4));
+
+    if (format) {
+        this._initFormat(format);
+    }
+
+    this.clear();
+}
+
+rbush.prototype = {
+
+    all: function all() {
+        return this._all(this.data, []);
+    },
+
+    search: function search(bbox) {
+
+        var node = this.data,
+            result = [],
+            toBBox = this.toBBox;
+
+        if (!intersects$1(bbox, node)) return result;
+
+        var nodesToSearch = [],
+            i,
+            len,
+            child,
+            childBBox;
+
+        while (node) {
+            for (i = 0, len = node.children.length; i < len; i++) {
+
+                child = node.children[i];
+                childBBox = node.leaf ? toBBox(child) : child;
+
+                if (intersects$1(bbox, childBBox)) {
+                    if (node.leaf) result.push(child);else if (contains(bbox, childBBox)) this._all(child, result);else nodesToSearch.push(child);
+                }
+            }
+            node = nodesToSearch.pop();
+        }
+
+        return result;
+    },
+
+    collides: function collides(bbox) {
+
+        var node = this.data,
+            toBBox = this.toBBox;
+
+        if (!intersects$1(bbox, node)) return false;
+
+        var nodesToSearch = [],
+            i,
+            len,
+            child,
+            childBBox;
+
+        while (node) {
+            for (i = 0, len = node.children.length; i < len; i++) {
+
+                child = node.children[i];
+                childBBox = node.leaf ? toBBox(child) : child;
+
+                if (intersects$1(bbox, childBBox)) {
+                    if (node.leaf || contains(bbox, childBBox)) return true;
+                    nodesToSearch.push(child);
+                }
+            }
+            node = nodesToSearch.pop();
+        }
+
+        return false;
+    },
+
+    load: function load(data) {
+        if (!(data && data.length)) return this;
+
+        if (data.length < this._minEntries) {
+            for (var i = 0, len = data.length; i < len; i++) {
+                this.insert(data[i]);
+            }
+            return this;
+        }
+
+        var node = this._build(data.slice(), 0, data.length - 1, 0);
+
+        if (!this.data.children.length) {
+            this.data = node;
+        } else if (this.data.height === node.height) {
+            this._splitRoot(this.data, node);
+        } else {
+            if (this.data.height < node.height) {
+                var tmpNode = this.data;
+                this.data = node;
+                node = tmpNode;
+            }
+
+            this._insert(node, this.data.height - node.height - 1, true);
+        }
+
+        return this;
+    },
+
+    insert: function insert(item) {
+        if (item) this._insert(item, this.data.height - 1);
+        return this;
+    },
+
+    clear: function clear() {
+        this.data = createNode([]);
+        return this;
+    },
+
+    remove: function remove(item, equalsFn) {
+        if (!item) return this;
+
+        var node = this.data,
+            bbox = this.toBBox(item),
+            path = [],
+            indexes = [],
+            i,
+            parent,
+            index,
+            goingUp;
+
+        while (node || path.length) {
+
+            if (!node) {
+                node = path.pop();
+                parent = path[path.length - 1];
+                i = indexes.pop();
+                goingUp = true;
+            }
+
+            if (node.leaf) {
+                index = findItem(item, node.children, equalsFn);
+
+                if (index !== -1) {
+                    node.children.splice(index, 1);
+                    path.push(node);
+                    this._condense(path);
+                    return this;
+                }
+            }
+
+            if (!goingUp && !node.leaf && contains(node, bbox)) {
+                path.push(node);
+                indexes.push(i);
+                i = 0;
+                parent = node;
+                node = node.children[0];
+            } else if (parent) {
+                i++;
+                node = parent.children[i];
+                goingUp = false;
+            } else node = null;
+        }
+
+        return this;
+    },
+
+    toBBox: function toBBox(item) {
+        return item;
+    },
+
+    compareMinX: compareNodeMinX,
+    compareMinY: compareNodeMinY,
+
+    toJSON: function toJSON() {
+        return this.data;
+    },
+
+    fromJSON: function fromJSON(data) {
+        this.data = data;
+        return this;
+    },
+
+    _all: function _all(node, result) {
+        var nodesToSearch = [];
+        while (node) {
+            if (node.leaf) result.push.apply(result, node.children);else nodesToSearch.push.apply(nodesToSearch, node.children);
+
+            node = nodesToSearch.pop();
+        }
+        return result;
+    },
+
+    _build: function _build(items, left, right, height) {
+
+        var N = right - left + 1,
+            M = this._maxEntries,
+            node;
+
+        if (N <= M) {
+            node = createNode(items.slice(left, right + 1));
+            calcBBox(node, this.toBBox);
+            return node;
+        }
+
+        if (!height) {
+            height = Math.ceil(Math.log(N) / Math.log(M));
+
+            M = Math.ceil(N / Math.pow(M, height - 1));
+        }
+
+        node = createNode([]);
+        node.leaf = false;
+        node.height = height;
+
+        var N2 = Math.ceil(N / M),
+            N1 = N2 * Math.ceil(Math.sqrt(M)),
+            i,
+            j,
+            right2,
+            right3;
+
+        multiSelect(items, left, right, N1, this.compareMinX);
+
+        for (i = left; i <= right; i += N1) {
+
+            right2 = Math.min(i + N1 - 1, right);
+
+            multiSelect(items, i, right2, N2, this.compareMinY);
+
+            for (j = i; j <= right2; j += N2) {
+
+                right3 = Math.min(j + N2 - 1, right2);
+
+                node.children.push(this._build(items, j, right3, height - 1));
+            }
+        }
+
+        calcBBox(node, this.toBBox);
+
+        return node;
+    },
+
+    _chooseSubtree: function _chooseSubtree(bbox, node, level, path) {
+
+        var i, len, child, targetNode, area, enlargement, minArea, minEnlargement;
+
+        while (true) {
+            path.push(node);
+
+            if (node.leaf || path.length - 1 === level) break;
+
+            minArea = minEnlargement = Infinity;
+
+            for (i = 0, len = node.children.length; i < len; i++) {
+                child = node.children[i];
+                area = bboxArea(child);
+                enlargement = enlargedArea(bbox, child) - area;
+
+                if (enlargement < minEnlargement) {
+                    minEnlargement = enlargement;
+                    minArea = area < minArea ? area : minArea;
+                    targetNode = child;
+                } else if (enlargement === minEnlargement) {
+                    if (area < minArea) {
+                        minArea = area;
+                        targetNode = child;
+                    }
+                }
+            }
+
+            node = targetNode || node.children[0];
+        }
+
+        return node;
+    },
+
+    _insert: function _insert(item, level, isNode) {
+
+        var toBBox = this.toBBox,
+            bbox = isNode ? item : toBBox(item),
+            insertPath = [];
+
+        var node = this._chooseSubtree(bbox, this.data, level, insertPath);
+
+        node.children.push(item);
+        extend(node, bbox);
+
+        while (level >= 0) {
+            if (insertPath[level].children.length > this._maxEntries) {
+                this._split(insertPath, level);
+                level--;
+            } else break;
+        }
+
+        this._adjustParentBBoxes(bbox, insertPath, level);
+    },
+
+    _split: function _split(insertPath, level) {
+
+        var node = insertPath[level],
+            M = node.children.length,
+            m = this._minEntries;
+
+        this._chooseSplitAxis(node, m, M);
+
+        var splitIndex = this._chooseSplitIndex(node, m, M);
+
+        var newNode = createNode(node.children.splice(splitIndex, node.children.length - splitIndex));
+        newNode.height = node.height;
+        newNode.leaf = node.leaf;
+
+        calcBBox(node, this.toBBox);
+        calcBBox(newNode, this.toBBox);
+
+        if (level) insertPath[level - 1].children.push(newNode);else this._splitRoot(node, newNode);
+    },
+
+    _splitRoot: function _splitRoot(node, newNode) {
+        this.data = createNode([node, newNode]);
+        this.data.height = node.height + 1;
+        this.data.leaf = false;
+        calcBBox(this.data, this.toBBox);
+    },
+
+    _chooseSplitIndex: function _chooseSplitIndex(node, m, M) {
+
+        var i, bbox1, bbox2, overlap, area, minOverlap, minArea, index;
+
+        minOverlap = minArea = Infinity;
+
+        for (i = m; i <= M - m; i++) {
+            bbox1 = distBBox(node, 0, i, this.toBBox);
+            bbox2 = distBBox(node, i, M, this.toBBox);
+
+            overlap = intersectionArea(bbox1, bbox2);
+            area = bboxArea(bbox1) + bboxArea(bbox2);
+
+            if (overlap < minOverlap) {
+                minOverlap = overlap;
+                index = i;
+
+                minArea = area < minArea ? area : minArea;
+            } else if (overlap === minOverlap) {
+                if (area < minArea) {
+                    minArea = area;
+                    index = i;
+                }
+            }
+        }
+
+        return index;
+    },
+
+    _chooseSplitAxis: function _chooseSplitAxis(node, m, M) {
+
+        var compareMinX = node.leaf ? this.compareMinX : compareNodeMinX,
+            compareMinY = node.leaf ? this.compareMinY : compareNodeMinY,
+            xMargin = this._allDistMargin(node, m, M, compareMinX),
+            yMargin = this._allDistMargin(node, m, M, compareMinY);
+
+        if (xMargin < yMargin) node.children.sort(compareMinX);
+    },
+
+    _allDistMargin: function _allDistMargin(node, m, M, compare) {
+
+        node.children.sort(compare);
+
+        var toBBox = this.toBBox,
+            leftBBox = distBBox(node, 0, m, toBBox),
+            rightBBox = distBBox(node, M - m, M, toBBox),
+            margin = bboxMargin(leftBBox) + bboxMargin(rightBBox),
+            i,
+            child;
+
+        for (i = m; i < M - m; i++) {
+            child = node.children[i];
+            extend(leftBBox, node.leaf ? toBBox(child) : child);
+            margin += bboxMargin(leftBBox);
+        }
+
+        for (i = M - m - 1; i >= m; i--) {
+            child = node.children[i];
+            extend(rightBBox, node.leaf ? toBBox(child) : child);
+            margin += bboxMargin(rightBBox);
+        }
+
+        return margin;
+    },
+
+    _adjustParentBBoxes: function _adjustParentBBoxes(bbox, path, level) {
+        for (var i = level; i >= 0; i--) {
+            extend(path[i], bbox);
+        }
+    },
+
+    _condense: function _condense(path) {
+        for (var i = path.length - 1, siblings; i >= 0; i--) {
+            if (path[i].children.length === 0) {
+                if (i > 0) {
+                    siblings = path[i - 1].children;
+                    siblings.splice(siblings.indexOf(path[i]), 1);
+                } else this.clear();
+            } else calcBBox(path[i], this.toBBox);
+        }
+    },
+
+    _initFormat: function _initFormat(format) {
+
+        var compareArr = ['return a', ' - b', ';'];
+
+        this.compareMinX = new Function('a', 'b', compareArr.join(format[0]));
+        this.compareMinY = new Function('a', 'b', compareArr.join(format[1]));
+
+        this.toBBox = new Function('a', 'return {minX: a' + format[0] + ', minY: a' + format[1] + ', maxX: a' + format[2] + ', maxY: a' + format[3] + '};');
+    }
+};
+
+function findItem(item, items, equalsFn) {
+    if (!equalsFn) return items.indexOf(item);
+
+    for (var i = 0; i < items.length; i++) {
+        if (equalsFn(item, items[i])) return i;
+    }
+    return -1;
+}
+
+function calcBBox(node, toBBox) {
+    distBBox(node, 0, node.children.length, toBBox, node);
+}
+
+function distBBox(node, k, p, toBBox, destNode) {
+    if (!destNode) destNode = createNode(null);
+    destNode.minX = Infinity;
+    destNode.minY = Infinity;
+    destNode.maxX = -Infinity;
+    destNode.maxY = -Infinity;
+
+    for (var i = k, child; i < p; i++) {
+        child = node.children[i];
+        extend(destNode, node.leaf ? toBBox(child) : child);
+    }
+
+    return destNode;
+}
+
+function extend(a, b) {
+    a.minX = Math.min(a.minX, b.minX);
+    a.minY = Math.min(a.minY, b.minY);
+    a.maxX = Math.max(a.maxX, b.maxX);
+    a.maxY = Math.max(a.maxY, b.maxY);
+    return a;
+}
+
+function compareNodeMinX(a, b) {
+    return a.minX - b.minX;
+}
+function compareNodeMinY(a, b) {
+    return a.minY - b.minY;
+}
+
+function bboxArea(a) {
+    return (a.maxX - a.minX) * (a.maxY - a.minY);
+}
+function bboxMargin(a) {
+    return a.maxX - a.minX + (a.maxY - a.minY);
+}
+
+function enlargedArea(a, b) {
+    return (Math.max(b.maxX, a.maxX) - Math.min(b.minX, a.minX)) * (Math.max(b.maxY, a.maxY) - Math.min(b.minY, a.minY));
+}
+
+function intersectionArea(a, b) {
+    var minX = Math.max(a.minX, b.minX),
+        minY = Math.max(a.minY, b.minY),
+        maxX = Math.min(a.maxX, b.maxX),
+        maxY = Math.min(a.maxY, b.maxY);
+
+    return Math.max(0, maxX - minX) * Math.max(0, maxY - minY);
+}
+
+function contains(a, b) {
+    return a.minX <= b.minX && a.minY <= b.minY && b.maxX <= a.maxX && b.maxY <= a.maxY;
+}
+
+function intersects$1(a, b) {
+    return b.minX <= a.maxX && b.minY <= a.maxY && b.maxX >= a.minX && b.maxY >= a.minY;
+}
+
+function createNode(children) {
+    return {
+        children: children,
+        height: 1,
+        leaf: true,
+        minX: Infinity,
+        minY: Infinity,
+        maxX: -Infinity,
+        maxY: -Infinity
+    };
+}
+
+function multiSelect(arr, left, right, n, compare) {
+    var stack = [left, right],
+        mid;
+
+    while (stack.length) {
+        right = stack.pop();
+        left = stack.pop();
+
+        if (right - left <= n) continue;
+
+        mid = left + Math.ceil((right - left) / n / 2) * n;
+        quickselect(arr, mid, left, right, compare);
+
+        stack.push(left, mid, mid, right);
+    }
+}
+
 var options$3 = {
     'blur': 2
 };
@@ -5314,11 +5982,18 @@ var BigLineLayer = function (_BigDataLayer) {
         return possibleConstructorReturn(this, _BigDataLayer.apply(this, arguments));
     }
 
+    BigLineLayer.prototype.identify = function identify(coordinate, options) {
+        var renderer$$1 = this._getRenderer();
+        if (!renderer$$1) {
+            return null;
+        }
+        return renderer$$1.identify(coordinate, options);
+    };
+
     return BigLineLayer;
 }(BigDataLayer);
 
 BigLineLayer.mergeOptions(options$3);
-
 BigLineLayer.registerJSONType('BigLineLayer');
 
 var BigLineRenderer = function (_PathRenderer) {
@@ -5337,7 +6012,6 @@ var BigLineRenderer = function (_PathRenderer) {
 
     BigLineRenderer.prototype.draw = function draw() {
         this.prepareCanvas();
-
         this._drawLines();
         this.completeRender();
     };
@@ -5349,11 +6023,39 @@ var BigLineRenderer = function (_PathRenderer) {
 
     BigLineRenderer.prototype.onRemove = function onRemove() {
         delete this._lineArrays;
+        delete this._rbush;
         _PathRenderer.prototype.onRemove.apply(this, arguments);
     };
 
     BigLineRenderer.prototype.getTexture = function getTexture(symbol) {
         return this.getLineTexture(symbol);
+    };
+
+    BigLineRenderer.prototype.identify = function identify(coordinate, options) {
+        if (!this._rbush) return null;
+        var map = this.getMap();
+        var targetZ = getTargetZoom(map);
+        var cp = map.coordinateToPoint(coordinate, targetZ);
+
+        var scale = map.getScale() / map.getScale(targetZ);
+        var tolerance = 5 / scale;
+
+        var hits = this._rbush.search({
+            minX: cp.x - tolerance,
+            minY: cp.y - tolerance,
+            maxX: cp.x + tolerance,
+            maxY: cp.y + tolerance
+        });
+
+        var result = [];
+        var added = new Set();
+        hits.forEach(function (hit) {
+            if (!added.has(hit.data)) {
+                added.add(hit.data);
+                result.push(hit.data);
+            }
+        });
+        return result;
     };
 
     BigLineRenderer.prototype._drawLines = function _drawLines() {
@@ -5382,18 +6084,15 @@ var BigLineRenderer = function (_PathRenderer) {
     };
 
     BigLineRenderer.prototype._prepareLineData = function _prepareLineData() {
-        if (this._lineArrays) {
-            return;
-        }
+        if (this._lineArrays) return;
+
         var gl = this.gl,
             map = this.getMap();
         var data = this.layer.data;
         var painter = new LinePainter(gl, map);
         var symbol = void 0;
         for (var i = 0, l = data.length; i < l; i++) {
-            if (!data[i]) {
-                continue;
-            }
+            if (!data[i]) continue;
             if (Array.isArray(data[i])) {
                 symbol = this.getDataSymbol(data[i][1]);
                 painter.addLine(data[i][0], symbol);
@@ -5403,47 +6102,48 @@ var BigLineRenderer = function (_PathRenderer) {
             }
         }
 
-        var lineArrays = this._lineArrays = painter.getArrays();
+        this._lineArrays = painter.getArrays();
+        this._elementCount = this._lineArrays.elementArray.length;
 
-        this._elementCount = lineArrays.elementArray.length;
+        this._rbush = new rbush_1(16);
+        this._rbush.load(painter.bboxes);
     };
 
     BigLineRenderer.prototype._bufferLineData = function _bufferLineData(lineArrays) {
         var gl = this.gl;
+        var FSIZE = lineArrays.vertexArray.BYTES_PER_ELEMENT;
+        var stride = 6 * FSIZE;
 
         if (!this._vertexBuffer) {
             var vertexBuffer = this._vertexBuffer = this.createBuffer();
             gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
-            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(lineArrays.vertexArray), gl.STATIC_DRAW);
+            gl.bufferData(gl.ARRAY_BUFFER, lineArrays.vertexArray, gl.STATIC_DRAW);
         } else {
             gl.bindBuffer(gl.ARRAY_BUFFER, this._vertexBuffer);
         }
-        this.enableVertexAttrib(['a_pos', 2, 'FLOAT']);
 
-        if (!this._normalBuffer) {
-            var normalBuffer = this._normalBuffer = this.createBuffer();
-            gl.bindBuffer(gl.ARRAY_BUFFER, normalBuffer);
-            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(lineArrays.normalArray), gl.STATIC_DRAW);
-        } else {
-            gl.bindBuffer(gl.ARRAY_BUFFER, this._normalBuffer);
-        }
-        this.enableVertexAttrib([['a_normal', 2, 'FLOAT'], ['a_linesofar', 1, 'FLOAT']]);
+        var posAttr = gl.getAttribLocation(gl.program, 'a_pos');
+        gl.vertexAttribPointer(posAttr, 2, gl.FLOAT, false, stride, 0);
+        gl.enableVertexAttribArray(posAttr);
 
-        if (!this._texBuffer) {
-            var texBuffer = this._texBuffer = this.createBuffer();
-            gl.bindBuffer(gl.ARRAY_BUFFER, texBuffer);
-            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(lineArrays.styleArray), gl.STATIC_DRAW);
-        } else {
-            gl.bindBuffer(gl.ARRAY_BUFFER, this._texBuffer);
-        }
-        this.enableVertexAttrib([['a_style', 1, 'FLOAT']]);
+        var normalAttr = gl.getAttribLocation(gl.program, 'a_normal');
+        gl.vertexAttribPointer(normalAttr, 2, gl.FLOAT, false, stride, 2 * FSIZE);
+        gl.enableVertexAttribArray(normalAttr);
+
+        var linesofarAttr = gl.getAttribLocation(gl.program, 'a_linesofar');
+        gl.vertexAttribPointer(linesofarAttr, 1, gl.FLOAT, false, stride, 4 * FSIZE);
+        gl.enableVertexAttribArray(linesofarAttr);
+
+        var styleAttr = gl.getAttribLocation(gl.program, 'a_style');
+        gl.vertexAttribPointer(styleAttr, 1, gl.FLOAT, false, stride, 5 * FSIZE);
+        gl.enableVertexAttribArray(styleAttr);
 
         gl.bindBuffer(gl.ARRAY_BUFFER, null);
 
         if (!this._elementBuffer) {
             var elementBuffer = this._elementBuffer = this.createBuffer();
             gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, elementBuffer);
-            gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint32Array(lineArrays.elementArray), gl.STATIC_DRAW);
+            gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, lineArrays.elementArray, gl.STATIC_DRAW);
         } else {
             gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this._elementBuffer);
         }
@@ -5466,11 +6166,18 @@ var BigPolygonLayer = function (_BigDataLayer) {
         return possibleConstructorReturn(this, _BigDataLayer.apply(this, arguments));
     }
 
+    BigPolygonLayer.prototype.identify = function identify(coordinate, options) {
+        var renderer$$1 = this._getRenderer();
+        if (!renderer$$1) {
+            return null;
+        }
+        return renderer$$1.identify(coordinate, options);
+    };
+
     return BigPolygonLayer;
 }(BigDataLayer);
 
 BigPolygonLayer.mergeOptions(options$4);
-
 BigPolygonLayer.registerJSONType('BigPolygonLayer');
 
 BigPolygonLayer.registerRenderer('webgl', function (_BigLineRenderer) {
@@ -5508,6 +6215,34 @@ BigPolygonLayer.registerRenderer('webgl', function (_BigLineRenderer) {
         return this.getFillTexture(symbol);
     };
 
+    _class.prototype.identify = function identify(coordinate, options) {
+        var hits = _BigLineRenderer.prototype.identify.call(this, coordinate, options) || [];
+        if (!this._polyRbush) return hits;
+
+        var map = this.getMap();
+        var targetZ = getTargetZoom(map);
+        var cp = map.coordinateToPoint(coordinate, targetZ);
+
+        var scale = map.getScale() / map.getScale(targetZ);
+        var tolerance = 2 / scale;
+
+        var polyHits = this._polyRbush.search({
+            minX: cp.x - tolerance,
+            minY: cp.y - tolerance,
+            maxX: cp.x + tolerance,
+            maxY: cp.y + tolerance
+        });
+
+        var added = new Set(hits);
+        polyHits.forEach(function (hit) {
+            if (!added.has(hit.data)) {
+                added.add(hit.data);
+                hits.push(hit.data);
+            }
+        });
+        return hits;
+    };
+
     _class.prototype._drawPolygons = function _drawPolygons() {
         var gl = this.gl,
             program = this._polygonProgram;
@@ -5515,7 +6250,6 @@ BigPolygonLayer.registerRenderer('webgl', function (_BigLineRenderer) {
         this._checkSprites();
 
         this._preparePolygonData();
-
         this._bufferPolygonData(this._polygonArrays);
 
         var m = this.calcMatrices();
@@ -5527,9 +6261,8 @@ BigPolygonLayer.registerRenderer('webgl', function (_BigLineRenderer) {
     };
 
     _class.prototype._preparePolygonData = function _preparePolygonData() {
-        if (this._polygonArrays) {
-            return;
-        }
+        if (this._polygonArrays) return;
+
         var gl = this.gl,
             map = this.getMap();
 
@@ -5537,9 +6270,7 @@ BigPolygonLayer.registerRenderer('webgl', function (_BigLineRenderer) {
         var painter = new PolygonPainter(gl, map);
         var symbol = void 0;
         for (var i = 0, l = data.length; i < l; i++) {
-            if (!data[i]) {
-                continue;
-            }
+            if (!data[i]) continue;
             if (Array.isArray(data[i])) {
                 symbol = this.getDataSymbol(data[i][1]);
                 painter.addPolygon(data[i][0], symbol);
@@ -5548,36 +6279,43 @@ BigPolygonLayer.registerRenderer('webgl', function (_BigLineRenderer) {
                 painter.addPolygon(data[i], symbol);
             }
         }
-        var polygonArrays = this._polygonArrays = painter.getArrays();
-        this._polygonElementCount = polygonArrays.elementArray.length;
+
+        this._polygonArrays = painter.getArrays();
+        this._polygonElementCount = this._polygonArrays.elementArray.length;
+
+        this._polyRbush = new rbush_1(16);
+        this._polyRbush.load(painter.bboxes);
     };
 
     _class.prototype._bufferPolygonData = function _bufferPolygonData(polygonArrays) {
         var gl = this.gl;
+        var FSIZE = polygonArrays.vertexArray.BYTES_PER_ELEMENT;
+        var stride = 3 * FSIZE;
+
         if (!this._polygonVertexBuffer) {
             var vertexBuffer = this._polygonVertexBuffer = this.createBuffer();
             gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
-            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(polygonArrays.vertexArray), gl.STATIC_DRAW);
+            gl.bufferData(gl.ARRAY_BUFFER, polygonArrays.vertexArray, gl.STATIC_DRAW);
         } else {
             gl.bindBuffer(gl.ARRAY_BUFFER, this._polygonVertexBuffer);
         }
-        this.enableVertexAttrib(['a_pos', 2, 'FLOAT']);
 
-        if (!this._polygonTexBuffer) {
-            var texBuffer = this._polygonTexBuffer = this.createBuffer();
-            gl.bindBuffer(gl.ARRAY_BUFFER, texBuffer);
-            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(polygonArrays.styleArray), gl.STATIC_DRAW);
-        } else {
-            gl.bindBuffer(gl.ARRAY_BUFFER, this._polygonTexBuffer);
+        var posAttr = gl.getAttribLocation(gl.program, 'a_pos');
+        gl.vertexAttribPointer(posAttr, 2, gl.FLOAT, false, stride, 0);
+        gl.enableVertexAttribArray(posAttr);
+
+        var styleAttr = gl.getAttribLocation(gl.program, 'a_fill_style');
+        if (styleAttr >= 0) {
+            gl.vertexAttribPointer(styleAttr, 1, gl.FLOAT, false, stride, 2 * FSIZE);
+            gl.enableVertexAttribArray(styleAttr);
         }
-        this.enableVertexAttrib([['a_fill_style', 1, 'FLOAT']]);
 
         gl.bindBuffer(gl.ARRAY_BUFFER, null);
 
         if (!this._polygonElemBuffer) {
             var elementBuffer = this._polygonElemBuffer = this.createBuffer();
             gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, elementBuffer);
-            gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint32Array(polygonArrays.elementArray), gl.STATIC_DRAW);
+            gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, polygonArrays.elementArray, gl.STATIC_DRAW);
         } else {
             gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this._polygonElemBuffer);
         }
@@ -5585,6 +6323,7 @@ BigPolygonLayer.registerRenderer('webgl', function (_BigLineRenderer) {
 
     _class.prototype.onRemove = function onRemove() {
         delete this._polygonArrays;
+        delete this._polyRbush;
         _BigLineRenderer.prototype.onRemove.apply(this, arguments);
     };
 
@@ -5603,20 +6342,14 @@ var ExtrudePainter = function (_Painter) {
 
         var _this = possibleConstructorReturn(this, _Painter.call(this, gl, map, options));
 
-        _this.vertexArray = [];
-        _this.normalArray = [];
-        _this.elementArray = [];
-        _this.styleArray = [];
+        _this.buffer = new DynamicBuffer();
+        _this._vertexCount = 0;
+        _this.bboxes = [];
         return _this;
     }
 
     ExtrudePainter.prototype.getArrays = function getArrays() {
-        return {
-            'vertexArray': this.vertexArray,
-            'normalArray': this.normalArray,
-            'elementArray': this.elementArray,
-            'styleArray': this.styleArray
-        };
+        return this.buffer.getArrays();
     };
 
     ExtrudePainter.prototype.addPolygon = function addPolygon(polygon, height, style) {
@@ -5637,11 +6370,31 @@ var ExtrudePainter = function (_Painter) {
         }
 
         this._fillArrays(vertice, height, style);
+
+        var minX = Infinity,
+            minY = Infinity,
+            maxX = -Infinity,
+            maxY = -Infinity;
+        var targetZ = getTargetZoom(this.map);
+        var flat = earcut_1.flatten(vertice).vertices;
+        for (var _i = 0, _l = flat.length; _i < _l; _i += 2) {
+            var c = this.options['project'] ? this.map.coordinateToPoint(new Coordinate(flat[_i], flat[_i + 1]), targetZ) : { x: flat[_i], y: flat[_i + 1] };
+            if (c.x < minX) minX = c.x;
+            if (c.y < minY) minY = c.y;
+            if (c.x > maxX) maxX = c.x;
+            if (c.y > maxY) maxY = c.y;
+        }
+        if (minX !== Infinity) {
+            this.bboxes.push({
+                minX: minX, minY: minY, maxX: maxX, maxY: maxY,
+                data: polygon
+            });
+        }
         return this;
     };
 
     ExtrudePainter.prototype._fillArrays = function _fillArrays(vertice, height, style) {
-        var dimension = 3;
+        var _this2 = this;
 
         var targetZ = getTargetZoom(this.map);
         var data = earcut_1.flatten(vertice);
@@ -5649,10 +6402,9 @@ var ExtrudePainter = function (_Painter) {
         var bottom = [];
         var top = [];
         var c = void 0;
-
         for (var i = 0, l = data.vertices.length; i < l; i += 2) {
-            if (i === l - 1) {
-                if (this._equalCoord(data.vertices[i], data.vertices[0])) {
+            if (i === l - 2) {
+                if (this._equalCoord([data.vertices[i], data.vertices[i + 1]], [data.vertices[0], data.vertices[1]])) {
                     continue;
                 }
             }
@@ -5665,67 +6417,53 @@ var ExtrudePainter = function (_Painter) {
                 top.push(data.vertices[i], data.vertices[i + 1], height);
             }
         }
+
         data.vertices = bottom;
-        var triangles = earcut_1(data.vertices, data.holes, dimension);
+        var triangles = earcut_1(data.vertices, data.holes, 3);
         if (triangles.length <= 2) {
             return;
         }
-        var deviation = earcut_1.deviation(data.vertices, data.holes, dimension, triangles);
+        var deviation = earcut_1.deviation(data.vertices, data.holes, 3, triangles);
         if (Math.round(deviation * 1E3) / 1E3 !== 0) {
-            if (console) {
-                console.warn('Failed triangluation.');
-            }
+            if (console) console.warn('Failed triangluation.');
             return;
         }
 
-        var count = bottom.length / dimension;
-
-        var preCount = this.vertexArray.length / dimension;
-        if (preCount > 0) {
-            triangles = triangles.map(function (e) {
-                return e + preCount;
-            });
-        }
-
-        Util.pushIn(this.vertexArray, bottom);
-
-        Util.pushIn(this.elementArray, triangles);
-
-        for (var _i = 0; _i < count; _i++) {
-            this.normalArray.push(0, 0, -1);
-        }
-
-        if (count > 0) {
-            triangles = triangles.map(function (e) {
-                return e + count;
-            });
-        }
-
-        Util.pushIn(this.vertexArray, top);
-
-        Util.pushIn(this.elementArray, triangles);
+        var count = bottom.length / 3;
+        var styleValue = style.index * 100 + (style.symbol['polygonOpacity'] || 1) * 10;
 
         for (var _i2 = 0; _i2 < count; _i2++) {
-            this.normalArray.push(0, 0, 1);
+            this.buffer.pushVertex(bottom[_i2 * 3], bottom[_i2 * 3 + 1], bottom[_i2 * 3 + 2], 0, 0, -1, styleValue);
         }
+        var bottomTriangles = triangles.map(function (e) {
+            return e + _this2._vertexCount;
+        });
+        this.buffer.pushElementArray(bottomTriangles);
+        this._vertexCount += count;
 
-        var vertexCount = this.vertexArray.length / dimension;
-        for (var _i3 = 0, _l = count; _i3 < _l - 1; _i3++) {
-            var ii = _i3 * dimension;
+        for (var _i3 = 0; _i3 < count; _i3++) {
+            this.buffer.pushVertex(top[_i3 * 3], top[_i3 * 3 + 1], top[_i3 * 3 + 2], 0, 0, 1, styleValue);
+        }
+        var topTriangles = triangles.map(function (e) {
+            return e + _this2._vertexCount;
+        });
+        this.buffer.pushElementArray(topTriangles);
+        this._vertexCount += count;
+
+        for (var _i4 = 0, _l2 = count; _i4 < _l2 - 1; _i4++) {
+            var ii = _i4 * 3;
             var normal = new pointGeometry(bottom[ii + 3], bottom[ii + 4]).sub(new pointGeometry(bottom[ii], bottom[ii + 1]))._unit()._perp();
-            this.vertexArray.push(bottom[ii], bottom[ii + 1], bottom[ii + 2]);
-            this.vertexArray.push(bottom[ii + 3], bottom[ii + 4], bottom[ii + 5]);
-            this.vertexArray.push(top[ii + 3], top[ii + 4], top[ii + 5]);
-            this.vertexArray.push(top[ii], top[ii + 1], top[ii + 2]);
-            for (var n = 0; n < 4; n++) {
-                this.normalArray.push(normal.x, normal.y, 0);
-            }
-            var ei = _i3 * 4;
-            this.elementArray.push(vertexCount + ei, vertexCount + ei + 1, vertexCount + ei + 2);
-            this.elementArray.push(vertexCount + ei, vertexCount + ei + 2, vertexCount + ei + 3);
-        }
 
-        this._addTexCoords(this.vertexArray.length / dimension - preCount, style);
+            var vOffset = this._vertexCount;
+            this.buffer.pushVertex(bottom[ii], bottom[ii + 1], bottom[ii + 2], normal.x, normal.y, 0, styleValue);
+            this.buffer.pushVertex(bottom[ii + 3], bottom[ii + 4], bottom[ii + 5], normal.x, normal.y, 0, styleValue);
+            this.buffer.pushVertex(top[ii + 3], top[ii + 4], top[ii + 5], normal.x, normal.y, 0, styleValue);
+            this.buffer.pushVertex(top[ii], top[ii + 1], top[ii + 2], normal.x, normal.y, 0, styleValue);
+            this._vertexCount += 4;
+
+            this.buffer.pushElement(vOffset, vOffset + 1, vOffset + 2);
+            this.buffer.pushElement(vOffset, vOffset + 2, vOffset + 3);
+        }
     };
 
     ExtrudePainter.prototype._getVertice = function _getVertice(geo) {
@@ -5735,13 +6473,6 @@ var ExtrudePainter = function (_Painter) {
             geo = geo.coordinates;
         }
         return geo;
-    };
-
-    ExtrudePainter.prototype._addTexCoords = function _addTexCoords(n, style) {
-        var v = style.index * 100 + (style.symbol['polygonOpacity'] || 1) * 10;
-        for (var i = 0; i < n; i++) {
-            this.styleArray.push(v);
-        }
     };
 
     ExtrudePainter.prototype._equalCoord = function _equalCoord(c1, c2) {
@@ -5768,11 +6499,18 @@ var ExtrudePolygonLayer = function (_BigDataLayer) {
         return possibleConstructorReturn(this, _BigDataLayer.apply(this, arguments));
     }
 
+    ExtrudePolygonLayer.prototype.identify = function identify(coordinate, options) {
+        var renderer$$1 = this._getRenderer();
+        if (!renderer$$1) {
+            return null;
+        }
+        return renderer$$1.identify(coordinate, options);
+    };
+
     return ExtrudePolygonLayer;
 }(BigDataLayer);
 
 ExtrudePolygonLayer.mergeOptions(options$5);
-
 ExtrudePolygonLayer.registerJSONType('ExtrudePolygonLayer');
 
 var ExtrudeRenderer = function (_PathRenderer) {
@@ -5789,7 +6527,6 @@ var ExtrudeRenderer = function (_PathRenderer) {
         _PathRenderer.prototype.onContextCreate.call(this);
         var gl = this.gl;
         gl.enable(gl.DEPTH_TEST);
-
         gl.disable(gl.BLEND);
         gl.disable(gl.STENCIL_TEST);
         gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
@@ -5808,11 +6545,40 @@ var ExtrudeRenderer = function (_PathRenderer) {
 
     ExtrudeRenderer.prototype.onRemove = function onRemove() {
         delete this._extrudeArrays;
+        delete this._extrudeRbush;
         _PathRenderer.prototype.onRemove.apply(this, arguments);
     };
 
     ExtrudeRenderer.prototype.getTexture = function getTexture(symbol) {
         return this.getFillTexture(symbol);
+    };
+
+    ExtrudeRenderer.prototype.identify = function identify(coordinate, options) {
+        if (!this._extrudeRbush) return null;
+
+        var map = this.getMap();
+        var targetZ = getTargetZoom(map);
+        var cp = map.coordinateToPoint(coordinate, targetZ);
+
+        var scale$$1 = map.getScale() / map.getScale(targetZ);
+        var tolerance = 2 / scale$$1;
+
+        var hits = this._extrudeRbush.search({
+            minX: cp.x - tolerance,
+            minY: cp.y - tolerance,
+            maxX: cp.x + tolerance,
+            maxY: cp.y + tolerance
+        });
+
+        var result = [];
+        var added = new Set();
+        hits.forEach(function (hit) {
+            if (!added.has(hit.data)) {
+                added.add(hit.data);
+                result.push(hit.data);
+            }
+        });
+        return result;
     };
 
     ExtrudeRenderer.prototype._drawExtrudes = function _drawExtrudes() {
@@ -5837,6 +6603,7 @@ var ExtrudeRenderer = function (_PathRenderer) {
 
         var lightIntensity = this.layer.options['lightIntensity'] || 0.5;
         gl.uniform1f(gl.program['u_lightintensity'], lightIntensity);
+
         this._bufferExtrudeData(this._extrudeArrays);
         gl.drawElements(gl.TRIANGLES, this._elementCount, gl.UNSIGNED_INT, 0);
 
@@ -5853,9 +6620,7 @@ var ExtrudeRenderer = function (_PathRenderer) {
         var data = this.layer.data;
         var painter = new ExtrudePainter(gl, map);
         for (var i = 0, l = data.length; i < l; i++) {
-            if (!data[i]) {
-                continue;
-            }
+            if (!data[i]) continue;
             if (Array.isArray(data[i])) {
                 var symbol = this.getDataSymbol(data[i][1]);
                 var height = data[i][1]['height'];
@@ -5868,46 +6633,48 @@ var ExtrudeRenderer = function (_PathRenderer) {
                 painter.addPolygon(data[i], _pHeight, _symbol);
             }
         }
-        var extrudeArrays = this._extrudeArrays = painter.getArrays();
-        this._elementCount = extrudeArrays.elementArray.length;
+        this._extrudeArrays = painter.getArrays();
+        this._elementCount = this._extrudeArrays.elementArray.length;
+
+        this._extrudeRbush = new rbush_1(16);
+        this._extrudeRbush.load(painter.bboxes);
     };
 
     ExtrudeRenderer.prototype._bufferExtrudeData = function _bufferExtrudeData(extrudeArrays) {
         var gl = this.gl;
+        var FSIZE = extrudeArrays.vertexArray.BYTES_PER_ELEMENT;
+        var stride = 7 * FSIZE;
 
         if (!this._vertexBuffer) {
             var vertexBuffer = this._vertexBuffer = this.createBuffer();
             gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
-            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(extrudeArrays.vertexArray), gl.STATIC_DRAW);
+            gl.bufferData(gl.ARRAY_BUFFER, extrudeArrays.vertexArray, gl.STATIC_DRAW);
         } else {
             gl.bindBuffer(gl.ARRAY_BUFFER, this._vertexBuffer);
         }
-        this.enableVertexAttrib(['a_pos', 3, 'FLOAT']);
 
-        if (!this._normalBuffer) {
-            var normalBuffer = this._normalBuffer = this.createBuffer();
-            gl.bindBuffer(gl.ARRAY_BUFFER, normalBuffer);
-            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(extrudeArrays.normalArray), gl.STATIC_DRAW);
-        } else {
-            gl.bindBuffer(gl.ARRAY_BUFFER, this._normalBuffer);
-        }
-        this.enableVertexAttrib(['a_normal', 3, 'FLOAT']);
+        var posAttr = gl.getAttribLocation(gl.program, 'a_pos');
+        gl.vertexAttribPointer(posAttr, 3, gl.FLOAT, false, stride, 0);
+        gl.enableVertexAttribArray(posAttr);
 
-        if (!this._texBuffer) {
-            var texBuffer = this._texBuffer = this.createBuffer();
-            gl.bindBuffer(gl.ARRAY_BUFFER, texBuffer);
-            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(extrudeArrays.styleArray), gl.STATIC_DRAW);
-        } else {
-            gl.bindBuffer(gl.ARRAY_BUFFER, this._texBuffer);
+        var normalAttr = gl.getAttribLocation(gl.program, 'a_normal');
+        if (normalAttr >= 0) {
+            gl.vertexAttribPointer(normalAttr, 3, gl.FLOAT, false, stride, 3 * FSIZE);
+            gl.enableVertexAttribArray(normalAttr);
         }
-        this.enableVertexAttrib([['a_fill_style', 1, 'FLOAT']]);
+
+        var styleAttr = gl.getAttribLocation(gl.program, 'a_fill_style');
+        if (styleAttr >= 0) {
+            gl.vertexAttribPointer(styleAttr, 1, gl.FLOAT, false, stride, 6 * FSIZE);
+            gl.enableVertexAttribArray(styleAttr);
+        }
 
         gl.bindBuffer(gl.ARRAY_BUFFER, null);
 
         if (!this._elementBuffer) {
             var elementBuffer = this._elementBuffer = this.createBuffer();
             gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, elementBuffer);
-            gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint32Array(extrudeArrays.elementArray), gl.STATIC_DRAW);
+            gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, extrudeArrays.elementArray, gl.STATIC_DRAW);
         } else {
             gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this._elementBuffer);
         }

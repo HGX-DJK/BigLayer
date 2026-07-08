@@ -3,53 +3,24 @@ import Painter from './Painter';
 import earcut from 'earcut';
 import Point from '@mapbox/point-geometry';
 import { getTargetZoom } from './Painter';
+import DynamicBuffer from './Buffer';
 
 const options = {
-    //输入数据为经纬度时, 转化为2d point
     'project' : true
 };
 
-/**
- * A Polygon Painter to produce vertex coordinates for WebGL shaders. <br>
- *
- * @author fuzhenn
- * @class
- */
 export default class ExtrudePainter extends Painter {
     constructor(gl, map, options) {
         super(gl, map, options);
-        // 结果数组
-        //-----------
-        this.vertexArray = [];
-        this.normalArray = [];
-        this.elementArray = [];
-        this.styleArray = [];
+        this.buffer = new DynamicBuffer();
+        this._vertexCount = 0;
+        this.bboxes = [];
     }
 
-    /**
-     * 返回结果数组
-     * @return {Object} 结果数组
-     */
     getArrays() {
-        return {
-            'vertexArray'  : this.vertexArray,
-            'normalArray' : this.normalArray,
-            'elementArray' : this.elementArray,
-            'styleArray'   : this.styleArray
-        };
+        return this.buffer.getArrays();
     }
 
-    /**
-     * 添加一条Polygon数据的坐标数组,  坐标为经纬度或者2d point(坐标方向与屏幕坐标相同).
-     * 当数据为经纬度时, 需要把options中的project设为true
-     * 多边形数据可以是 Polygon, 也可以是 MultiPolygon.
-     * 如果是MultiPolygon, 数组形式为: [[[x0, y0],[x1, y1], ..]]
-     *                                        第一条多边形的坐标数组      第二条线的坐标数组
-     * 如果是MultiPolygon, 数组形式为: [[[[x00, y00],[x01, y01], ..]], [[[x10, y10],[x11, y11], ..]]]
-     * style为多边形的样式, 用来生成样式数据.
-     * @param {Number[][]|Number[][][]} polygon - 多边形坐标数组
-     * @param {Object} style - 多边形的样式, maptalks.js的Symbol
-     */
     addPolygon(polygon, height, style) {
         if (!polygon) {
             return this;
@@ -60,7 +31,6 @@ export default class ExtrudePainter extends Painter {
 
         const vertice = this._getVertice(polygon);
 
-        //输入是MultiPolygon时, 遍历children, 并依次添加处理
         if (vertice[0] && Array.isArray(vertice[0][0]) && Array.isArray(vertice[0][0][0])) {
             for (let i = 0, l = vertice.length; i < l; i++) {
                 this.addPolygon(vertice[i], height, style);
@@ -69,22 +39,39 @@ export default class ExtrudePainter extends Painter {
         }
 
         this._fillArrays(vertice, height, style);
+
+        // Compute bounding box for spatial index (2D projection)
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        const targetZ = getTargetZoom(this.map);
+        const flat = earcut.flatten(vertice).vertices;
+        for (let i = 0, l = flat.length; i < l; i += 2) {
+            const c = this.options['project'] ?
+                this.map.coordinateToPoint(new maptalks.Coordinate(flat[i], flat[i + 1]), targetZ) :
+                {x: flat[i], y: flat[i+1]};
+            if (c.x < minX) minX = c.x;
+            if (c.y < minY) minY = c.y;
+            if (c.x > maxX) maxX = c.x;
+            if (c.y > maxY) maxY = c.y;
+        }
+        if (minX !== Infinity) {
+            this.bboxes.push({
+                minX: minX, minY: minY, maxX: maxX, maxY: maxY,
+                data: polygon
+            });
+        }
         return this;
     }
 
     _fillArrays(vertice, height, style) {
-        const dimension = 3;
-
         const targetZ = getTargetZoom(this.map);
         const data = earcut.flatten(vertice);
 
         const bottom = [];
         const top = [];
         let c;
-        //push 3d points
         for (let i = 0, l = data.vertices.length; i < l; i += 2) {
-            if (i === l - 1) {
-                if (this._equalCoord(data.vertices[i], data.vertices[0])) {
+            if (i === l - 2) {
+                if (this._equalCoord([data.vertices[i], data.vertices[i + 1]], [data.vertices[0], data.vertices[1]])) {
                     continue;
                 }
             }
@@ -97,86 +84,61 @@ export default class ExtrudePainter extends Painter {
                 top.push(data.vertices[i], data.vertices[i + 1], height);
             }
         }
+
         data.vertices = bottom;
-        let triangles = earcut(data.vertices, data.holes, dimension);
+        const triangles = earcut(data.vertices, data.holes, 3);
         if (triangles.length <= 2) {
             return;
         }
-        const deviation = earcut.deviation(data.vertices, data.holes, dimension, triangles);
+        const deviation = earcut.deviation(data.vertices, data.holes, 3, triangles);
         if (Math.round(deviation * 1E3) / 1E3 !== 0) {
-            if (console) {
-                console.warn('Failed triangluation.');
-            }
+            if (console) console.warn('Failed triangluation.');
             return;
         }
 
-        const count = bottom.length / dimension;
+        const count = bottom.length / 3;
+        const styleValue = style.index * 100 + (style.symbol['polygonOpacity'] || 1) * 10;
 
-        const preCount = this.vertexArray.length / dimension;
-        if (preCount > 0) {
-            triangles = triangles.map(e => e + preCount);
-        }
-        // push bottom vertice
-        maptalks.Util.pushIn(this.vertexArray, bottom);
-        // push bottom elements
-        maptalks.Util.pushIn(this.elementArray, triangles);
-        // push bottom normals
+        // push bottom vertices (normal: 0, 0, -1)
         for (let i = 0; i < count; i++) {
-            this.normalArray.push(0, 0, -1);
+            this.buffer.pushVertex(bottom[i * 3], bottom[i * 3 + 1], bottom[i * 3 + 2], 0, 0, -1, styleValue);
         }
+        const bottomTriangles = triangles.map(e => e + this._vertexCount);
+        this.buffer.pushElementArray(bottomTriangles);
+        this._vertexCount += count;
 
-
-        if (count > 0) {
-            triangles = triangles.map(e => e + count);
-        }
-        // push top vertice
-        maptalks.Util.pushIn(this.vertexArray, top);
-        // push top elements
-        maptalks.Util.pushIn(this.elementArray, triangles);
-        // push top normals
+        // push top vertices (normal: 0, 0, 1)
         for (let i = 0; i < count; i++) {
-            this.normalArray.push(0, 0, 1);
+            this.buffer.pushVertex(top[i * 3], top[i * 3 + 1], top[i * 3 + 2], 0, 0, 1, styleValue);
         }
+        const topTriangles = triangles.map(e => e + this._vertexCount);
+        this.buffer.pushElementArray(topTriangles);
+        this._vertexCount += count;
 
-        // push wall elements
-        const vertexCount = this.vertexArray.length / dimension;
+        // push wall vertices
         for (let i = 0, l = count; i < l - 1; i++) {
-            const ii = i * dimension;
+            const ii = i * 3;
             const normal = new Point(bottom[ii + 3], bottom[ii + 4]).sub(new Point(bottom[ii], bottom[ii + 1]))._unit()._perp();
-            this.vertexArray.push(bottom[ii], bottom[ii + 1], bottom[ii + 2]);
-            this.vertexArray.push(bottom[ii + 3], bottom[ii + 4], bottom[ii + 5]);
-            this.vertexArray.push(top[ii + 3], top[ii + 4], top[ii + 5]);
-            this.vertexArray.push(top[ii], top[ii + 1], top[ii + 2]);
-            for (let n = 0; n < 4; n++) {
-                this.normalArray.push(normal.x, normal.y, 0);
-            }
-            const ei = i * 4;
-            this.elementArray.push(vertexCount + ei, vertexCount + ei + 1, vertexCount + ei + 2);
-            this.elementArray.push(vertexCount + ei, vertexCount + ei + 2, vertexCount + ei + 3);
+
+            const vOffset = this._vertexCount;
+            this.buffer.pushVertex(bottom[ii], bottom[ii + 1], bottom[ii + 2], normal.x, normal.y, 0, styleValue);
+            this.buffer.pushVertex(bottom[ii + 3], bottom[ii + 4], bottom[ii + 5], normal.x, normal.y, 0, styleValue);
+            this.buffer.pushVertex(top[ii + 3], top[ii + 4], top[ii + 5], normal.x, normal.y, 0, styleValue);
+            this.buffer.pushVertex(top[ii], top[ii + 1], top[ii + 2], normal.x, normal.y, 0, styleValue);
+            this._vertexCount += 4;
+
+            this.buffer.pushElement(vOffset, vOffset + 1, vOffset + 2);
+            this.buffer.pushElement(vOffset, vOffset + 2, vOffset + 3);
         }
-
-
-        // push styles
-        this._addTexCoords(this.vertexArray.length / dimension - preCount, style);
     }
 
     _getVertice(geo) {
         if (geo.geometry) {
-            //GeoJSON feature
             geo = geo.geometry.coordinates;
         } else if (geo.coordinates) {
-            //GeoJSON geometry
             geo = geo.coordinates;
         }
         return geo;
-    }
-
-    _addTexCoords(n, style) {
-        // tex_idx * 100 + opacity * 10
-        const v = style.index * 100 + (style.symbol['polygonOpacity'] || 1) * 10;
-        for (let i = 0; i < n; i++) {
-            this.styleArray.push(v);
-        }
     }
 
     _equalCoord(c1, c2) {
